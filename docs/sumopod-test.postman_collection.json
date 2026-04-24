@@ -1,0 +1,49 @@
+{
+  "info": {
+    "name": "SumoPod Test",
+    "_postman_id": "c3a7cc9d-2c85-4f8f-9d49-9f3f9b7f5c45",
+    "description": "Collection for testing SumoPod chat completion endpoint.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/sumopod/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "sumopod", "health"]
+        }
+      }
+    },
+    {
+      "name": "Test Chat Completion",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"prompt\": \"Say hello in a creative way\",\n  \"model\": \"gemini-2.5-flash-lite\",\n  \"maxTokens\": 150,\n  \"temperature\": 0.5,\n  \"systemPrompt\": \"You are a helpful assistant that answers clearly and concisely in Bahasa Indonesia.\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/sumopod/test",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "sumopod", "test"]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    }
+  ]
+}

@@ -1,0 +1,192 @@
+1️⃣ PATCH /me (update profile)
+
+Ini paling natural setelah /me
+
+Tujuan:
+
+User bisa update:
+
+account_name
+full_name
+⚠️ Jangan boleh:
+update role
+Contoh controller:
+async function updateMe(req, res, next) {
+  try {
+    const { account_name, full_name } = req.body;
+
+    const { data, error } = await req.supabase
+      .from("profiles")
+      .update({
+        account_name,
+        full_name,
+      })
+      .eq("id", req.user.id)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    res.json({
+      success: true,
+      message: "Profile updated successfully",
+      data,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+Route:
+
+router.patch("/me", authMiddleware, authController.updateMe);
+2️⃣ Persona (core fitur kamu)
+
+Karena kamu sudah desain DB:
+
+👉 persona_configs
+
+Next:
+
+create persona
+list persona per user
+3️⃣ Topics
+
+Flow:
+
+generate topic
+save ke content_topics
+mark used
+4️⃣ Social account (Threads)
+
+Flow:
+
+connect Threads
+simpan token
+nanti auto post
+🔥 Insight penting (yang sekarang kamu sudah ca
+
+
+
+Kalau lihat schema dan API yang sudah ada, next yang paling enak itu bukan langsung “semua tabel”, tapi bikin alur inti konten selesai dulu.
+
+Urutan yang paling masuk akal:
+
+content_topics
+
+Ini step paling natural setelah persona_configs.
+Fungsinya: simpan ide/topik konten per persona.
+Endpoint yang enak:
+GET /content-topics
+POST /content-topics
+PATCH /content-topics/:id
+DELETE /content-topics/:id
+Kenapa duluan: topik adalah bahan baku buat generate konten.
+content_outputs
+
+Ini hasil generate dari persona + topic.
+Di sini kamu mulai punya value utama app: draft konten Threads.
+Endpoint yang cocok:
+POST /content-outputs/generate
+GET /content-outputs
+GET /content-outputs/:id
+PATCH /content-outputs/:id
+Ini bisa pakai persona_config_id, topic_id, ai_settings.
+prompt_templates
+
+Biar prompt generation kamu fleksibel dan gampang diubah tanpa hardcode.
+Cocok kalau nanti mau bikin beberapa template:
+“hook fokus”
+“educational post”
+“soft CTA”
+Endpoint:
+GET /prompt-templates
+POST /prompt-templates
+PATCH /prompt-templates/:id
+ai_settings
+
+Simpan preference model per user, misalnya gpt-4o, temperature, max_tokens.
+Ini bagus buat make generation configurable.
+Endpoint:
+GET /ai-settings
+POST /ai-settings
+PATCH /ai-settings
+generation_logs
+
+Ini penting buat debugging dan audit.
+Setiap generate konten, simpan input/output/error.
+Sangat berguna kalau nanti user bilang “kenapa hasilnya jelek?”.
+Bisa dijadikan internal-only endpoint dulu.
+social_accounts + real Threads publish
+
+Sekarang threadsRoutes masih ada mock post.
+Next step yang besar adalah:
+simpan token ke social_accounts
+implement real post ke Threads
+lalu simpan hasilnya ke published_posts
+Jadi alurnya jadi lengkap: generate -> review -> publish -> track status.
+user_usage + user_subscriptions + subscription_plans
+
+Ini bagus kalau kamu mau monetisasi atau kasih limit AI credits.
+Biasanya dikerjain setelah core content flow jalan.
+Contoh:
+limit persona per plan
+limit generate per bulan
+cek credit sebelum generate
+Kalau aku yang ngerjain, urutannya begini:
+
+content_topics
+content_outputs
+real publish ke Threads + published_posts
+generation_logs
+ai_settings dan prompt_templates
+billing/usage: subscription_plans, user_subscriptions, user_usage
+Kenapa begitu:
+
+Kamu sudah punya profile dan persona_configs, jadi fondasinya sudah ada.
+Yang paling penting sekarang adalah bikin “value loop”:
+user pilih persona
+user pilih/topik dibuat
+AI generate konten
+user publish
+hasilnya tercatat
+Saran praktis untuk API berikutnya:
+
+Tambah module baru di src/routes/, src/controllers/, src/services/
+Mulai dari contentTopics
+Lalu bikin contentOutputs
+Setelah itu baru rapikan threads supaya tidak mock lagi
+Catatan kecil:
+
+Tabel topics2 kelihatan seperti versi lama/duplikat. Kalau memang masih dipakai, sebaiknya diputuskan: mau dipertahankan sementara atau dimigrasi ke content_topics supaya schema-nya rapi.
+Kalau kamu mau, aku bisa bantu lanjut bikin roadmap endpoint yang lebih detail per folder, atau langsung bantu desain CRUD untuk content_topics dulu sesuai struktur codebase kamu yang sekarang.
+
+
+
+const persona = await getPersonaConfig(persona_config_id);
+const pillar = await getContentPillar(content_pillar_id);
+
+const prompt = `
+You are a content strategist.
+
+Use this persona:
+- Persona: ${persona.persona}
+- Audience: ${persona.target_audience}
+- Niche: ${persona.niche_topic_focus}
+- Style: ${persona.content_style}
+- Tone: ${persona.tone}
+- Goal: ${persona.goal}
+
+Use this content pillar:
+- Pillar Name: ${pillar.pillar_name}
+- Template: ${pillar.template_content}
+- Objective: ${pillar.target_objective}
+- Audience Segment: ${pillar.audience_segment}
+- Key Message: ${pillar.key_message}
+- CTA Direction: ${pillar.cta_direction}
+- Affiliate Link: ${pillar.affiliate_link}
+
+Generate 10 content topics.
+`;
