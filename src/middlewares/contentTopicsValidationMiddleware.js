@@ -1,6 +1,9 @@
-﻿const {
+const {
   normalizeContentTopicPayload,
 } = require("../services/contentTopicsService");
+const {
+  normalizeGenerateContentTopicsPayload,
+} = require("../services/contentTopicsGenerationService");
 
 function createHttpError(message, status = 500) {
   const error = new Error(message);
@@ -34,6 +37,43 @@ function validateCreateContentTopicRequest(req, res, next) {
   }
 }
 
+function validateGenerateContentTopicsRequest(req, res, next) {
+  try {
+    const contentTopicGenerateInput = normalizeGenerateContentTopicsPayload(req.body);
+
+    if (!contentTopicGenerateInput.contentPillarId) {
+      throw createHttpError("Missing required field: contentPillarId", 400);
+    }
+
+    if (!contentTopicGenerateInput.templateText) {
+      throw createHttpError("Missing required field: templateText", 400);
+    }
+
+    if (
+      contentTopicGenerateInput.jumlahTopics === undefined ||
+      contentTopicGenerateInput.jumlahTopics === null
+    ) {
+      throw createHttpError("Missing required field: jumlahTopics", 400);
+    }
+
+    if (!Number.isInteger(contentTopicGenerateInput.jumlahTopics)) {
+      throw createHttpError("jumlahTopics must be an integer", 400);
+    }
+
+    if (
+      contentTopicGenerateInput.jumlahTopics < 1 ||
+      contentTopicGenerateInput.jumlahTopics > 10
+    ) {
+      throw createHttpError("jumlahTopics must be between 1 and 10", 400);
+    }
+
+    req.contentTopicGenerateInput = contentTopicGenerateInput;
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
 function validateUpdateContentTopicRequest(req, res, next) {
   try {
     req.contentTopicInput = normalizeContentTopicPayload(req.body);
@@ -58,5 +98,6 @@ function validateContentTopicIdParam(req, res, next) {
 module.exports = {
   validateContentTopicIdParam,
   validateCreateContentTopicRequest,
+  validateGenerateContentTopicsRequest,
   validateUpdateContentTopicRequest,
 };

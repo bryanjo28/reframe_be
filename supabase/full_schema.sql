@@ -81,6 +81,22 @@ CREATE TABLE public.generation_logs (
   CONSTRAINT generation_logs_persona_config_id_fkey FOREIGN KEY (persona_config_id) REFERENCES public.persona_configs(id),
   CONSTRAINT generation_logs_topic_id_fkey FOREIGN KEY (topic_id) REFERENCES public.content_topics(id)
 );
+CREATE TABLE public.generation_topic_logs (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  persona_config_id uuid NOT NULL,
+  prompt_tokens integer,
+  completion_tokens integer,
+  total_tokens integer,
+  status text NOT NULL DEFAULT 'success'::text,
+  error_message text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  topic_count integer DEFAULT 0,
+  provider text,
+  CONSTRAINT generation_topic_logs_pkey PRIMARY KEY (id),
+  CONSTRAINT generation_topic_logs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
+  CONSTRAINT generation_topic_logs_persona_config_id_fkey FOREIGN KEY (persona_config_id) REFERENCES public.persona_configs(id)
+);
 CREATE TABLE public.persona_configs (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
@@ -100,12 +116,12 @@ CREATE TABLE public.persona_configs (
   gaya_hook text,
   seberapa_personal text,
   cta_style text,
-  is_active boolean NOT NULL DEFAULT true,
   content_pillar_prioritas text,
   referensi_gaya text,
   batasan_konten text,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  is_active boolean NOT NULL DEFAULT true,
   CONSTRAINT persona_configs_pkey PRIMARY KEY (id),
   CONSTRAINT persona_configs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
 );

@@ -4,7 +4,6 @@ async function listPromptTemplates(req, res, next) {
   try {
     const data = await promptTemplatesService.listPromptTemplates({
       supabase: req.supabase,
-      userId: req.user.id,
     });
 
     res.status(200).json({
@@ -21,7 +20,6 @@ async function getPromptTemplateById(req, res, next) {
   try {
     const data = await promptTemplatesService.getPromptTemplateById({
       supabase: req.supabase,
-      userId: req.user.id,
       id: req.params.id,
     });
 

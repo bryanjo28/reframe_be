@@ -1,5 +1,6 @@
 const { isSupabaseConfigured } = require("../config/supabase");
 const promptTemplatesService = require("./promptTemplatesService");
+const sumopodService = require("./sumopodService");
 const { createGenerationLog } = require("./generationLogsService");
 const {
   assertContentPillarBelongsToUserAndPersona,
@@ -257,6 +258,94 @@ function buildDefaultDraft({
   ].join(" ");
 }
 
+function buildContentOutputSystemPrompt() {
+  return [
+    "Kamu adalah asisten copywriter yang menulis content output untuk media sosial.",
+    "Tulis dalam Bahasa Indonesia yang natural, jelas, dan siap dipakai.",
+    "Kalau ada CTA link atau key message dari content pillar, gunakan secara natural tanpa memaksa.",
+    "Jangan menambahkan penjelasan meta tentang proses berpikirmu.",
+  ].join(" ");
+}
+
+function buildContentOutputUserPrompt({
+  persona,
+  topic,
+  contentPillar,
+  promptTemplate,
+  promptContext,
+  sourceContentOutput,
+}) {
+  const lines = [
+    "Buat satu content output final yang siap dipakai.",
+    "",
+    "Konteks utama:",
+    `- Topic: ${topic?.topic || promptContext.topic || "-"}`,
+    `- Category: ${promptContext.category || "-"}`,
+    `- Subcategory: ${promptContext.subcategory || "-"}`,
+    `- Platform: ${promptContext.platform || "-"}`,
+    `- Format Output: ${promptContext.formatOutput || "-"}`,
+    "",
+    "Persona:",
+    `- Persona: ${persona?.persona || promptContext.persona || "-"}`,
+    `- Target Audience: ${persona?.target_audience || promptContext.targetAudience || "-"}`,
+    `- Niche Topic Focus: ${persona?.niche_topic_focus || promptContext.nicheTopicFocus || "-"}`,
+    `- Content Style: ${persona?.content_style || promptContext.contentStyle || "-"}`,
+    `- Tone: ${persona?.tone || promptContext.tone || "-"}`,
+    `- Goal: ${persona?.goal || promptContext.goal || "-"}`,
+    "",
+    "Content pillar:",
+    `- Pillar Name: ${contentPillar?.pillarName || promptContext.pillarName || "-"}`,
+    `- Objective: ${contentPillar?.targetObjective || promptContext.pillarObjective || "-"}`,
+    `- Audience Segment: ${contentPillar?.audienceSegment || promptContext.pillarAudienceSegment || "-"}`,
+    `- Key Message: ${contentPillar?.keyMessage || promptContext.pillarKeyMessage || "-"}`,
+    `- CTA Direction: ${contentPillar?.ctaDirection || promptContext.pillarCtaDirection || "-"}`,
+    `- CTA Link / Affiliate: ${contentPillar?.affiliateLink || promptContext.pillarAffiliateLink || "-"}`,
+    "",
+    sourceContentOutput?.content
+      ? [
+          "Previous content reference:",
+          sourceContentOutput.content,
+          "",
+        ].join("\n")
+      : "",
+    promptTemplate?.resolvedTemplate
+      ? [
+          "Prompt template reference:",
+          promptTemplate.resolvedTemplate,
+          "",
+        ].join("\n")
+      : "",
+    promptContext.additionalPrompt
+      ? `Instruksi tambahan dari user: ${promptContext.additionalPrompt}`
+      : "",
+    promptContext.improvementHint
+      ? `Fokus perbaikan: ${promptContext.improvementHint}`
+      : "",
+    "",
+    "Output requirements:",
+    "1. Tulis satu output final yang langsung siap dipakai.",
+    "2. Kalau cocok, buat hook yang kuat di awal.",
+    "3. Jangan bertele-tele.",
+    "4. Jika ada CTA link, letakkan natural di bagian yang relevan.",
+    "5. Jangan pakai format JSON, cukup teks final.",
+  ].filter(Boolean);
+
+  return lines.join("\n");
+}
+
+function shouldLogContentOutputGenerationDebug() {
+  const flag = String(process.env.CONTENT_OUTPUTS_GENERATE_DEBUG || "").trim().toLowerCase();
+  return flag === "true" || flag === "1" || flag === "yes";
+}
+
+function logContentOutputGenerationDebug(label, payload) {
+  if (!shouldLogContentOutputGenerationDebug()) {
+    return;
+  }
+
+  console.log(`[content-outputs.generate] ${label}`, JSON.stringify(payload, null, 2));
+}
+
 async function assertPersonaConfigBelongsToUser({ supabase, userId, personaConfigId }) {
   const { data, error } = await supabase
     .from("persona_configs")
@@ -303,6 +392,31 @@ async function assertTopicBelongsToUserAndPersona({
 
   if (personaConfigId && data.persona_config_id !== personaConfigId) {
     throw createHttpError("topicId does not belong to the selected personaConfigId", 400);
+  }
+
+  return data;
+}
+
+async function getTopicWithOptionalContentPillar({
+  supabase,
+  userId,
+  topicId,
+}) {
+  const { data, error } = await supabase
+    .from("content_topics")
+    .select(
+      "id, user_id, persona_config_id, content_pillar_id, category, subcategory, topic, used_at, created_at"
+    )
+    .eq("id", topicId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    throw createHttpError(error.message, 400, error);
+  }
+
+  if (!data) {
+    throw createHttpError("Content topic not found", 404);
   }
 
   return data;
@@ -356,6 +470,27 @@ async function getSourceContentOutput({ supabase, userId, sourceContentOutputId 
   }
 
   return data;
+}
+
+async function markTopicAsUsed({ supabase, userId, topicId }) {
+  if (!topicId) {
+    return null;
+  }
+
+  const usedAt = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("content_topics")
+    .update({ used_at: usedAt })
+    .eq("id", topicId)
+    .eq("user_id", userId)
+    .select("id, used_at")
+    .maybeSingle();
+
+  if (error) {
+    throw createHttpError(error.message, 400, error);
+  }
+
+  return data || null;
 }
 
 function buildPromptContext({ persona, topic, contentPillar, sourceContentOutput, input }) {
@@ -519,29 +654,35 @@ async function generateContentOutput({ supabase, userId, payload }) {
   let contentPillar = null;
   let sourceContentOutput = null;
   let promptTemplate = null;
+  let resolvedPersonaConfigId = input.personaConfigId || null;
 
   try {
-    if (!input.personaConfigId) {
-      throw createHttpError("Missing required field: personaConfigId", 400);
+    if (!input.topicId) {
+      throw createHttpError("Missing required field: topicId", 400);
+    }
+
+    topic = await getTopicWithOptionalContentPillar({
+      supabase,
+      userId,
+      topicId: input.topicId,
+    });
+
+    resolvedPersonaConfigId = resolvedPersonaConfigId || topic.persona_config_id;
+
+    if (!resolvedPersonaConfigId) {
+      throw createHttpError("Unable to resolve personaConfigId from topic", 400);
     }
 
     persona = await assertPersonaConfigBelongsToUser({
       supabase,
       userId,
-      personaConfigId: input.personaConfigId,
-    });
-
-    topic = await assertTopicBelongsToUserAndPersona({
-      supabase,
-      userId,
-      topicId: input.topicId,
-      personaConfigId: input.personaConfigId,
+      personaConfigId: resolvedPersonaConfigId,
     });
 
     contentPillar = await resolveContentPillarForOutput({
       supabase,
       userId,
-      personaConfigId: input.personaConfigId,
+      personaConfigId: resolvedPersonaConfigId,
       topic,
       contentPillarId: input.contentPillarId,
     });
@@ -569,30 +710,54 @@ async function generateContentOutput({ supabase, userId, payload }) {
     });
 
     const resolvedPromptTemplate = resolvePromptTemplate(promptTemplate, promptContext);
-    const generatedContent = resolvedPromptTemplate?.resolvedTemplate
-      ? `${resolvedPromptTemplate.resolvedTemplate}\n\n${buildDefaultDraft({
-          persona,
-          topic,
-          contentPillar,
-          platform: input.platform || promptContext.platform,
-          formatOutput: input.formatOutput || promptContext.formatOutput,
-          additionalPrompt: input.additionalPrompt,
-          improvementHint: input.improvementHint,
-        })}`
-      : buildDefaultDraft({
-          persona,
-          topic,
-          contentPillar,
-          platform: input.platform || promptContext.platform,
-          formatOutput: input.formatOutput || promptContext.formatOutput,
-          additionalPrompt: input.additionalPrompt,
-          improvementHint: input.improvementHint,
-        });
+    const systemPrompt = buildContentOutputSystemPrompt();
+    const userPrompt = buildContentOutputUserPrompt({
+      persona,
+      topic,
+      contentPillar,
+      promptTemplate: resolvedPromptTemplate,
+      promptContext,
+      sourceContentOutput,
+    });
+
+    logContentOutputGenerationDebug("prompt", {
+      systemPrompt,
+      userPrompt,
+      promptTemplate: resolvedPromptTemplate,
+      promptContext,
+    });
+
+    const aiResult = await sumopodService.generateChatCompletion({
+      model: input.model || "gpt-4o-mini",
+      maxTokens: input.maxTokens || 1200,
+      temperature: input.temperature || 0.5,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    });
+
+    const generatedContent = String(aiResult.content || "").trim() || buildDefaultDraft({
+      persona,
+      topic,
+      contentPillar,
+      platform: input.platform || promptContext.platform,
+      formatOutput: input.formatOutput || promptContext.formatOutput,
+      additionalPrompt: input.additionalPrompt,
+      improvementHint: input.improvementHint,
+    });
+
+    logContentOutputGenerationDebug("sumopod_response", {
+      model: aiResult.model,
+      raw: aiResult.raw,
+      content: aiResult.content,
+    });
 
     const insertPayload = buildInsertPayload({
       userId,
       input: {
         ...input,
+        personaConfigId: resolvedPersonaConfigId,
         contentPillarId: contentPillar?.id || input.contentPillarId || topic?.content_pillar_id || null,
         platform: input.platform || promptContext.platform || "threads",
         formatOutput: input.formatOutput || promptContext.formatOutput || null,
@@ -619,14 +784,25 @@ async function generateContentOutput({ supabase, userId, payload }) {
 
     const contentOutput = mapContentOutputRow(data);
 
+    try {
+      await markTopicAsUsed({
+        supabase,
+        userId,
+        topicId: topic.id,
+      });
+    } catch (topicUsedError) {
+      console.error("Failed to mark topic as used:", topicUsedError);
+    }
+
     const generationLog = await createGenerationLog({
       supabase,
       userId,
       payload: {
-        personaConfigId: input.personaConfigId,
+        personaConfigId: resolvedPersonaConfigId,
         topicId: input.topicId,
         inputPayload: {
           ...input,
+          personaConfigId: resolvedPersonaConfigId,
           promptTemplate: resolvedPromptTemplate,
           promptContext,
           sourceContentOutputId: input.sourceContentOutputId || null,
@@ -635,6 +811,10 @@ async function generateContentOutput({ supabase, userId, payload }) {
         outputPayload: {
           contentOutput,
           generatedContent,
+          aiResponse: {
+            model: aiResult.model,
+            usage: aiResult.raw?.usage || null,
+          },
         },
         status: "success",
       },
@@ -652,18 +832,19 @@ async function generateContentOutput({ supabase, userId, payload }) {
         supabase,
         userId,
         payload: {
-          personaConfigId: input.personaConfigId || null,
+          personaConfigId: resolvedPersonaConfigId || null,
           topicId: input.topicId || null,
           inputPayload: {
             ...input,
+            personaConfigId: resolvedPersonaConfigId || input.personaConfigId || null,
             promptTemplateId: input.promptTemplateId || null,
             sourceContentOutputId: input.sourceContentOutputId || null,
             startedAt,
           },
-          outputPayload: null,
-          status: "failed",
-          errorMessage: error.message,
-        },
+        outputPayload: null,
+        status: "failed",
+        errorMessage: error.message,
+      },
       });
     } catch (logError) {
       console.error("Failed to write generation log:", logError);

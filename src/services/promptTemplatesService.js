@@ -1,4 +1,9 @@
-﻿const { isSupabaseConfigured } = require("../config/supabase");
+const {
+  isSupabaseConfigured,
+  isSupabaseAdminConfigured,
+  supabase: publicSupabase,
+  supabaseAdmin,
+} = require("../config/supabase");
 
 function createHttpError(message, status = 500, details) {
   const error = new Error(message);
@@ -169,18 +174,43 @@ function buildUpdatePayload(input) {
   return payload;
 }
 
-async function listPromptTemplates({ supabase, userId }) {
-  if (!isSupabaseConfigured || !supabase) {
+async function assertAdminUser({ userId }) {
+  if (!isSupabaseAdminConfigured || !supabaseAdmin) {
+    throw createHttpError(
+      "Supabase admin client is not configured. Fill SUPABASE_SERVICE_ROLE_KEY first.",
+      500
+    );
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) {
+    throw createHttpError(error.message, 500, error);
+  }
+
+  if (!data || data.role !== "admin") {
+    throw createHttpError("Forbidden", 403);
+  }
+}
+
+async function listPromptTemplates({ supabase: supabaseClient }) {
+  const client = supabaseClient || publicSupabase;
+
+  if (!isSupabaseConfigured || !client) {
     throw createHttpError(
       "Supabase is not configured. Fill SUPABASE_URL and SUPABASE_ANON_KEY first.",
       500
     );
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("prompt_templates")
     .select("*")
-    .or(`is_global.eq.true,user_id.eq.${userId}`)
+    .eq("is_global", true)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -190,7 +220,7 @@ async function listPromptTemplates({ supabase, userId }) {
   return (data || []).map(mapPromptTemplateRow);
 }
 
-async function getPromptTemplateById({ supabase, userId, id }) {
+async function getPromptTemplateById({ supabase, id }) {
   if (!isSupabaseConfigured || !supabase) {
     throw createHttpError(
       "Supabase is not configured. Fill SUPABASE_URL and SUPABASE_ANON_KEY first.",
@@ -202,7 +232,7 @@ async function getPromptTemplateById({ supabase, userId, id }) {
     .from("prompt_templates")
     .select("*")
     .eq("id", id)
-    .or(`is_global.eq.true,user_id.eq.${userId}`)
+    .eq("is_global", true)
     .maybeSingle();
 
   if (error) {
@@ -226,6 +256,7 @@ async function createPromptTemplate({ supabase, userId, payload }) {
 
   const input = normalizePromptTemplatePayload(payload);
   assertCreatePromptTemplatePayload(input);
+  await assertAdminUser({ userId });
 
   const insertPayload = buildInsertPayload({ userId, input });
   const { data, error } = await supabase
@@ -251,6 +282,7 @@ async function updatePromptTemplate({ supabase, userId, id, payload }) {
 
   const input = normalizePromptTemplatePayload(payload);
   const updatePayload = buildUpdatePayload(input);
+  await assertAdminUser({ userId });
 
   if (Object.keys(updatePayload).length === 0) {
     throw createHttpError("No valid fields to update", 400);
@@ -282,6 +314,8 @@ async function deletePromptTemplate({ supabase, userId, id }) {
       500
     );
   }
+
+  await assertAdminUser({ userId });
 
   const { data, error } = await supabase
     .from("prompt_templates")

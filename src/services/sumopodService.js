@@ -29,7 +29,7 @@ function createSumoPodClient() {
 
 async function generateChatCompletion({
   messages,
-  model = "gemini-2.5-flash-lite",
+  model = "gpt-4o-mini",
   maxTokens = 150,
   temperature = 0.5,
 }) {

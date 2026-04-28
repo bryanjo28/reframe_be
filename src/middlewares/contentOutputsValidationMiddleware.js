@@ -38,8 +38,8 @@ function validateGenerateContentOutputRequest(req, res, next) {
   try {
     const contentOutputInput = normalizeContentOutputPayload(req.body);
 
-    if (!contentOutputInput.personaConfigId) {
-      throw createHttpError("Missing required field: personaConfigId", 400);
+    if (!contentOutputInput.topicId) {
+      throw createHttpError("Missing required field: topicId", 400);
     }
 
     req.contentOutputInput = contentOutputInput;

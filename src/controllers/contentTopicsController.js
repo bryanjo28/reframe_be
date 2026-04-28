@@ -1,4 +1,5 @@
-﻿const contentTopicsService = require("../services/contentTopicsService");
+const contentTopicsService = require("../services/contentTopicsService");
+const contentTopicsGenerationService = require("../services/contentTopicsGenerationService");
 
 async function listContentTopics(req, res, next) {
   try {
@@ -53,6 +54,24 @@ async function createContentTopic(req, res, next) {
   }
 }
 
+async function generateContentTopics(req, res, next) {
+  try {
+    const data = await contentTopicsGenerationService.generateContentTopics({
+      supabase: req.supabase,
+      userId: req.user.id,
+      payload: req.contentTopicGenerateInput || req.body,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Content topics generated successfully",
+      data,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function updateContentTopic(req, res, next) {
   try {
     const data = await contentTopicsService.updateContentTopic({
@@ -93,6 +112,7 @@ async function deleteContentTopic(req, res, next) {
 module.exports = {
   createContentTopic,
   deleteContentTopic,
+  generateContentTopics,
   getContentTopicById,
   listContentTopics,
   updateContentTopic,

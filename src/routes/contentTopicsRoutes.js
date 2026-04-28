@@ -5,6 +5,7 @@ const contentTopicsController = require("../controllers/contentTopicsController"
 const {
   validateContentTopicIdParam,
   validateCreateContentTopicRequest,
+  validateGenerateContentTopicsRequest,
   validateUpdateContentTopicRequest,
 } = require("../middlewares/contentTopicsValidationMiddleware");
 
@@ -13,6 +14,12 @@ const router = express.Router();
 router.use(authMiddleware);
 
 router.get("/", contentTopicsController.listContentTopics);
+router.post(
+  "/generate",
+  validateGenerateContentTopicsRequest,
+  contentTopicsController.generateContentTopics
+);
+
 router.get(
   "/:id",
   validateContentTopicIdParam,
