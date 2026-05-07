@@ -5,6 +5,7 @@ const contentOutputsController = require("../controllers/contentOutputsControlle
 const {
   validateContentOutputIdParam,
   validateCreateContentOutputRequest,
+  validateGenerateContentOutputDemoRequest,
   validateGenerateContentOutputRequest,
   validateUpdateContentOutputRequest,
 } = require("../middlewares/contentOutputsValidationMiddleware");
@@ -28,6 +29,11 @@ router.post(
   "/generate",
   validateGenerateContentOutputRequest,
   contentOutputsController.generateContentOutput
+);
+router.post(
+  "/generate-demo",
+  validateGenerateContentOutputDemoRequest,
+  contentOutputsController.generateContentOutputDemo
 );
 router.patch(
   "/:id",

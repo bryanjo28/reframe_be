@@ -1,8 +1,6 @@
 const { isSupabaseConfigured } = require("../config/supabase");
 const sumopodService = require("./sumopodService");
-const {
-  createGenerationTopicLog,
-} = require("./generationTopicLogsService");
+const { createGenerationTopicLog } = require("./generationTopicLogsService");
 
 function createHttpError(message, status = 500, details) {
   const error = new Error(message);
@@ -72,6 +70,7 @@ function normalizeGenerateContentTopicsPayload(payload = {}) {
   };
 }
 
+
 function assertGenerateContentTopicsPayload(payload) {
   if (!payload.contentPillarId || payload.contentPillarId.length === 0) {
     throw createHttpError("Missing required field: contentPillarId", 400);
@@ -93,6 +92,7 @@ function assertGenerateContentTopicsPayload(payload) {
     throw createHttpError("jumlahTopics must be between 1 and 10", 400);
   }
 }
+
 
 function mapPersonaConfigRow(row) {
   if (!row) {
@@ -220,6 +220,7 @@ function buildTopicGenerationPrompt({ contentPillar, personaConfig, templateText
     "6. topics harus berjumlah sesuai permintaan dan unik.",
   ].join("\n");
 }
+
 
 function buildSystemPrompt() {
   return "You generate Indonesian content topic ideas and must output only valid JSON.";
@@ -372,7 +373,7 @@ async function generateContentTopics({ supabase, userId, payload }) {
       generationTopicLog,
     });
 
-    return response;
+  return response;
   } catch (error) {
     try {
       await createGenerationTopicLog({

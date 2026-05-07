@@ -1,5 +1,6 @@
-﻿const {
+const {
   normalizeContentOutputPayload,
+  normalizeGenerateContentOutputDemoPayload,
 } = require("../services/contentOutputsService");
 
 function createHttpError(message, status = 500) {
@@ -49,6 +50,33 @@ function validateGenerateContentOutputRequest(req, res, next) {
   }
 }
 
+function validateGenerateContentOutputDemoRequest(req, res, next) {
+  try {
+    const contentOutputDemoInput = normalizeGenerateContentOutputDemoPayload(req.body);
+
+    if (!contentOutputDemoInput.persona) {
+      throw createHttpError("Missing required field: persona", 400);
+    }
+
+    if (!contentOutputDemoInput.targetAudience) {
+      throw createHttpError("Missing required field: targetAudience", 400);
+    }
+
+    if (!contentOutputDemoInput.nicheTopicFocus) {
+      throw createHttpError("Missing required field: nicheTopicFocus", 400);
+    }
+
+    if (!contentOutputDemoInput.contentStyle) {
+      throw createHttpError("Missing required field: contentStyle", 400);
+    }
+
+    req.contentOutputDemoInput = contentOutputDemoInput;
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
 function validateUpdateContentOutputRequest(req, res, next) {
   try {
     req.contentOutputInput = normalizeContentOutputPayload(req.body);
@@ -73,6 +101,7 @@ function validateContentOutputIdParam(req, res, next) {
 module.exports = {
   validateContentOutputIdParam,
   validateCreateContentOutputRequest,
+  validateGenerateContentOutputDemoRequest,
   validateGenerateContentOutputRequest,
   validateUpdateContentOutputRequest,
 };

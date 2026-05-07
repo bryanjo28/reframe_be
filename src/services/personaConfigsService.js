@@ -64,45 +64,16 @@ function normalizePersonaConfigPayload(payload = {}) {
   const source = getSource(payload);
 
   return {
-    persona: readOptionalText(source, ["persona", "persona_name", "personaName"]),
+    persona: readOptionalText(source, ["persona"]),
     targetAudience: readOptionalText(source, ["targetAudience", "target_audience"]),
     nicheTopicFocus: readOptionalText(source, ["nicheTopicFocus", "niche_topic_focus"]),
     contentStyle: readOptionalText(source, ["contentStyle", "content_style"]),
     tone: readOptionalText(source, ["tone"]),
     goal: readOptionalText(source, ["goal"]),
-    posisiPersonaSaatIni: readOptionalText(
-      source,
-      ["posisiPersonaSaatIni", "posisi_persona_saat_ini"]
-    ),
-    audienceMasalahUtama: readOptionalText(
-      source,
-      ["audienceMasalahUtama", "audience_masalah_utama"]
-    ),
-    apaYangMerekaRasakan: readOptionalText(
-      source,
-      ["apaYangMerekaRasakan", "apa_yang_mereka_rasakan"]
-    ),
-    kenapaHarusFollow: readOptionalText(source, ["kenapaHarusFollow", "kenapa_harus_follow"]),
-    gayaKomunikasi: readOptionalText(source, ["gayaKomunikasi", "gaya_komunikasi"]),
     platform: readOptionalText(source, ["platform"]),
     formatOutput: readOptionalText(source, ["formatOutput", "format_output"]),
-    gayaHook: readOptionalText(source, ["gayaHook", "gaya_hook"]),
-    seberapaPersonal: readOptionalText(source, ["seberapaPersonal", "seberapa_personal"]),
-    ctaStyle: readOptionalText(source, ["ctaStyle", "cta_style"]),
     isActive: readOptionalBoolean(source, ["isActive", "is_active"]),
-    contentPillarPrioritas: readOptionalText(
-      source,
-      ["contentPillarPrioritas", "content_pillar_prioritas"]
-    ),
-    referensiGaya: readOptionalText(source, ["referensiGaya", "referensi_gaya"]),
-    batasanKonten: readOptionalText(source, ["batasanKonten", "batasan_konten"]),
   };
-}
-
-function assertCreatePersonaConfigPayload(payload) {
-  if (!payload.persona || payload.persona.length === 0) {
-    throw createHttpError("Missing required field: persona", 400);
-  }
 }
 
 function mapPersonaConfigRow(row) {
@@ -119,20 +90,9 @@ function mapPersonaConfigRow(row) {
     contentStyle: row.content_style,
     tone: row.tone,
     goal: row.goal,
-    posisiPersonaSaatIni: row.posisi_persona_saat_ini,
-    audienceMasalahUtama: row.audience_masalah_utama,
-    apaYangMerekaRasakan: row.apa_yang_mereka_rasakan,
-    kenapaHarusFollow: row.kenapa_harus_follow,
-    gayaKomunikasi: row.gaya_komunikasi,
     platform: row.platform,
     formatOutput: row.format_output,
-    gayaHook: row.gaya_hook,
-    seberapaPersonal: row.seberapa_personal,
-    ctaStyle: row.cta_style,
     isActive: row.is_active,
-    contentPillarPrioritas: row.content_pillar_prioritas,
-    referensiGaya: row.referensi_gaya,
-    batasanKonten: row.batasan_konten,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -147,32 +107,9 @@ function buildInsertPayload({ userId, input }) {
   if (input.contentStyle !== undefined) payload.content_style = input.contentStyle;
   if (input.tone !== undefined) payload.tone = input.tone;
   if (input.goal !== undefined) payload.goal = input.goal;
-  if (input.posisiPersonaSaatIni !== undefined) {
-    payload.posisi_persona_saat_ini = input.posisiPersonaSaatIni;
-  }
-  if (input.audienceMasalahUtama !== undefined) {
-    payload.audience_masalah_utama = input.audienceMasalahUtama;
-  }
-  if (input.apaYangMerekaRasakan !== undefined) {
-    payload.apa_yang_mereka_rasakan = input.apaYangMerekaRasakan;
-  }
-  if (input.kenapaHarusFollow !== undefined) {
-    payload.kenapa_harus_follow = input.kenapaHarusFollow;
-  }
-  if (input.gayaKomunikasi !== undefined) {
-    payload.gaya_komunikasi = input.gayaKomunikasi;
-  }
   if (input.platform !== undefined) payload.platform = input.platform;
   if (input.formatOutput !== undefined) payload.format_output = input.formatOutput;
-  if (input.gayaHook !== undefined) payload.gaya_hook = input.gayaHook;
-  if (input.seberapaPersonal !== undefined) payload.seberapa_personal = input.seberapaPersonal;
-  if (input.ctaStyle !== undefined) payload.cta_style = input.ctaStyle;
   if (input.isActive !== undefined && input.isActive !== null) payload.is_active = input.isActive;
-  if (input.contentPillarPrioritas !== undefined) {
-    payload.content_pillar_prioritas = input.contentPillarPrioritas;
-  }
-  if (input.referensiGaya !== undefined) payload.referensi_gaya = input.referensiGaya;
-  if (input.batasanKonten !== undefined) payload.batasan_konten = input.batasanKonten;
 
   return payload;
 }
@@ -186,32 +123,9 @@ function buildUpdatePayload(input) {
   if (input.contentStyle !== undefined) payload.content_style = input.contentStyle;
   if (input.tone !== undefined) payload.tone = input.tone;
   if (input.goal !== undefined) payload.goal = input.goal;
-  if (input.posisiPersonaSaatIni !== undefined) {
-    payload.posisi_persona_saat_ini = input.posisiPersonaSaatIni;
-  }
-  if (input.audienceMasalahUtama !== undefined) {
-    payload.audience_masalah_utama = input.audienceMasalahUtama;
-  }
-  if (input.apaYangMerekaRasakan !== undefined) {
-    payload.apa_yang_mereka_rasakan = input.apaYangMerekaRasakan;
-  }
-  if (input.kenapaHarusFollow !== undefined) {
-    payload.kenapa_harus_follow = input.kenapaHarusFollow;
-  }
-  if (input.gayaKomunikasi !== undefined) {
-    payload.gaya_komunikasi = input.gayaKomunikasi;
-  }
   if (input.platform !== undefined) payload.platform = input.platform;
   if (input.formatOutput !== undefined) payload.format_output = input.formatOutput;
-  if (input.gayaHook !== undefined) payload.gaya_hook = input.gayaHook;
-  if (input.seberapaPersonal !== undefined) payload.seberapa_personal = input.seberapaPersonal;
-  if (input.ctaStyle !== undefined) payload.cta_style = input.ctaStyle;
   if (input.isActive !== undefined && input.isActive !== null) payload.is_active = input.isActive;
-  if (input.contentPillarPrioritas !== undefined) {
-    payload.content_pillar_prioritas = input.contentPillarPrioritas;
-  }
-  if (input.referensiGaya !== undefined) payload.referensi_gaya = input.referensiGaya;
-  if (input.batasanKonten !== undefined) payload.batasan_konten = input.batasanKonten;
 
   return payload;
 }
@@ -272,16 +186,8 @@ async function createPersonaConfig({ supabase, userId, payload }) {
   }
 
   const input = normalizePersonaConfigPayload(payload);
-  assertCreatePersonaConfigPayload(input);
 
   const insertPayload = buildInsertPayload({ userId, input });
-  console.log("[persona-configs:create] insertPayload:", insertPayload);
-
-  const { data: authData, error: authError } = await supabase.auth.getUser();
-  console.log("[persona-configs:create] supabase.auth.getUser():", {
-    userId: authData?.user?.id,
-    error: authError?.message || null,
-  });
 
   const { data, error } = await supabase
     .from("persona_configs")

@@ -105,6 +105,18 @@ function normalizeContentOutputPayload(payload = {}) {
   };
 }
 
+function normalizeGenerateContentOutputDemoPayload(payload = {}) {
+  const source = getSource(payload);
+
+  return {
+    persona: readOptionalText(source, ["persona"]),
+    targetAudience: readOptionalText(source, ["targetAudience", "target_audience"]),
+    nicheTopicFocus: readOptionalText(source, ["nicheTopicFocus", "niche_topic_focus"]),
+    contentStyle: readOptionalText(source, ["contentStyle", "content_style"]),
+    formatOutput: readOptionalText(source, ["formatOutput", "format_output"]) || "threads pendek",
+  };
+}
+
 function assertCreateContentOutputPayload(payload) {
   if (!payload.personaConfigId || payload.personaConfigId.length === 0) {
     throw createHttpError("Missing required field: personaConfigId", 400);
@@ -256,6 +268,140 @@ function buildDefaultDraft({
     `Tone: ${tone}.${addOn}${hint}`,
     "Draft awal ini bisa diedit lagi sebelum publish.",
   ].join(" ");
+}
+
+function buildContentOutputDemoPrompt({ persona, targetAudience, nicheTopicFocus, contentStyle }) {
+  return [
+    "Kamu adalah asisten copywriter yang membuat maksimal 3 draft Threads singkat.",
+    "Balas HANYA dalam JSON valid tanpa markdown, tanpa code fence, tanpa penjelasan tambahan.",
+    "Struktur output harus seperti ini:",
+    '{ "success": true, "threads": [ { "title": "", "content": "", "cta": "" } ] }',
+    "",
+    "Aturan output:",
+    "1. Maksimal 3 threads.",
+    "2. Semua threads harus singkat, padat, dan cocok untuk Threads.",
+    "3. Gunakan bahasa Indonesia yang natural.",
+    "4. Setiap thread harus punya angle berbeda tapi tetap relevan.",
+    "5. CTA boleh ringan dan tidak hard-selling.",
+    "",
+    "Konteks persona:",
+    `- persona: ${persona || "-"}`,
+    `- target_audience: ${targetAudience || "-"}`,
+    `- niche_topic_focus: ${nicheTopicFocus || "-"}`,
+    `- content_style: ${contentStyle || "-"}`,
+    `- format_output: threads pendek`,
+    "",
+    "Buat 3 opsi thread terbaik yang siap dipakai sebagai draft.",
+  ].join("\n");
+}
+
+function mapPersonaConfigDraftRow(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    userId: row.user_id,
+    persona: row.persona,
+    targetAudience: row.target_audience,
+    nicheTopicFocus: row.niche_topic_focus,
+    contentStyle: row.content_style,
+    tone: row.tone,
+    goal: row.goal,
+    platform: row.platform,
+    formatOutput: row.format_output,
+    isActive: row.is_active,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function saveDemoPersonaConfig({ supabase, userId, input }) {
+  const draftPayload = {
+    persona: input.persona,
+    target_audience: input.targetAudience,
+    niche_topic_focus: input.nicheTopicFocus,
+    content_style: input.contentStyle,
+    platform: "Threads",
+    format_output: input.formatOutput || "threads pendek",
+    is_active: true,
+  };
+
+  const { data: existingPersonaConfig, error: existingError } = await supabase
+    .from("persona_configs")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingError) {
+    throw createHttpError(existingError.message, 400, existingError);
+  }
+
+  if (existingPersonaConfig) {
+    const { data, error } = await supabase
+      .from("persona_configs")
+      .update(draftPayload)
+      .eq("id", existingPersonaConfig.id)
+      .eq("user_id", userId)
+      .select("*")
+      .single();
+
+    if (error) {
+      throw createHttpError(error.message, 400, error);
+    }
+
+    return mapPersonaConfigDraftRow(data);
+  }
+
+  const { data, error } = await supabase
+    .from("persona_configs")
+    .insert({
+      user_id: userId,
+      ...draftPayload,
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw createHttpError(error.message, 400, error);
+  }
+
+  return mapPersonaConfigDraftRow(data);
+}
+
+function extractJsonText(text) {
+  if (!text) {
+    return "";
+  }
+
+  const rawText = String(text).trim();
+
+  const fencedMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fencedMatch?.[1]) {
+    return fencedMatch[1].trim();
+  }
+
+  const firstBrace = rawText.indexOf("{");
+  const lastBrace = rawText.lastIndexOf("}");
+
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    return rawText.slice(firstBrace, lastBrace + 1);
+  }
+
+  return rawText;
+}
+
+function parseGeneratedJsonContent(content) {
+  const jsonText = extractJsonText(content);
+
+  try {
+    return JSON.parse(jsonText);
+  } catch (error) {
+    throw createHttpError("Unable to parse generated content as JSON", 502, error);
+  }
 }
 
 function buildContentOutputSystemPrompt() {
@@ -854,6 +1000,89 @@ async function generateContentOutput({ supabase, userId, payload }) {
   }
 }
 
+async function generateContentOutputDemo({ supabase, userId, payload }) {
+  const input = normalizeGenerateContentOutputDemoPayload(payload);
+
+  if (!input.persona) {
+    throw createHttpError("Missing required field: persona", 400);
+  }
+
+  if (!input.targetAudience) {
+    throw createHttpError("Missing required field: targetAudience", 400);
+  }
+
+  if (!input.nicheTopicFocus) {
+    throw createHttpError("Missing required field: nicheTopicFocus", 400);
+  }
+
+  if (!input.contentStyle) {
+    throw createHttpError("Missing required field: contentStyle", 400);
+  }
+
+  const savedPersonaConfig = await saveDemoPersonaConfig({
+    supabase,
+    userId,
+    input,
+  });
+
+  const systemPrompt = [
+    "Kamu adalah asisten copywriter yang menulis draft Threads singkat.",
+    "Output harus berupa JSON valid saja, tanpa markdown dan tanpa code fence.",
+  ].join(" ");
+
+  const userPrompt = buildContentOutputDemoPrompt(input);
+
+  logContentOutputGenerationDebug("demo_prompt", {
+    userId,
+    input,
+    systemPrompt,
+    userPrompt,
+  });
+
+  const aiResult = await sumopodService.generateChatCompletion({
+    model: "gpt-4o-mini",
+    maxTokens: 1200,
+    temperature: 0.8,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+  });
+
+  logContentOutputGenerationDebug("demo_sumopod_response", {
+    model: aiResult.model,
+    raw: aiResult.raw,
+    content: aiResult.content,
+  });
+
+  const parsedContent = parseGeneratedJsonContent(aiResult.content);
+  if (Array.isArray(parsedContent?.threads) && parsedContent.threads.length > 3) {
+    parsedContent.threads = parsedContent.threads.slice(0, 3);
+  }
+
+  const usage = aiResult?.raw?.usage || {};
+
+  return {
+    success: true,
+    parsed_content: parsedContent,
+    usage: {
+      prompt_tokens: usage.prompt_tokens || 0,
+      completion_tokens: usage.completion_tokens || 0,
+      total_tokens: usage.total_tokens || 0,
+    },
+    request: {
+      personaConfigId: savedPersonaConfig?.id || null,
+      persona: input.persona,
+      targetAudience: input.targetAudience,
+      nicheTopicFocus: input.nicheTopicFocus,
+      contentStyle: input.contentStyle,
+      formatOutput: input.formatOutput,
+      maxThreads: 3,
+    },
+    personaConfig: savedPersonaConfig,
+  };
+}
+
 async function updateContentOutput({ supabase, userId, id, payload }) {
   if (!isSupabaseConfigured || !supabase) {
     throw createHttpError(
@@ -943,9 +1172,11 @@ async function deleteContentOutput({ supabase, userId, id }) {
 module.exports = {
   createContentOutput,
   deleteContentOutput,
+  generateContentOutputDemo,
   generateContentOutput,
   getContentOutputById,
   listContentOutputs,
   normalizeContentOutputPayload,
+  normalizeGenerateContentOutputDemoPayload,
   updateContentOutput,
 };

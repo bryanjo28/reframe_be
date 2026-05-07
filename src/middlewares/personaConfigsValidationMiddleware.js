@@ -19,8 +19,12 @@ function validateCreatePersonaConfigRequest(req, res, next) {
   try {
     const personaConfigInput = normalizePersonaConfigPayload(req.body);
 
-    if (!personaConfigInput.persona) {
-      throw createHttpError("Missing required field: persona", 400);
+    const hasAtLeastOneField = Object.values(personaConfigInput).some(
+      (value) => value !== undefined
+    );
+
+    if (!hasAtLeastOneField) {
+      throw createHttpError("At least one persona config field must be provided", 400);
     }
 
     req.personaConfigInput = personaConfigInput;

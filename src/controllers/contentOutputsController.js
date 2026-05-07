@@ -71,6 +71,24 @@ async function generateContentOutput(req, res, next) {
   }
 }
 
+async function generateContentOutputDemo(req, res, next) {
+  try {
+    const data = await contentOutputsService.generateContentOutputDemo({
+      supabase: req.supabase,
+      userId: req.user.id,
+      payload: req.contentOutputDemoInput || req.body,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Content output demo generated successfully",
+      data,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function updateContentOutput(req, res, next) {
   try {
     const data = await contentOutputsService.updateContentOutput({
@@ -111,6 +129,7 @@ async function deleteContentOutput(req, res, next) {
 module.exports = {
   createContentOutput,
   deleteContentOutput,
+  generateContentOutputDemo,
   generateContentOutput,
   getContentOutputById,
   listContentOutputs,
