@@ -3,6 +3,7 @@
 const authMiddleware = require("../middlewares/authMiddleware");
 const contentOutputsController = require("../controllers/contentOutputsController");
 const {
+  validateAutoGenerateContentOutputsRequest,
   validateContentOutputIdParam,
   validateCreateContentOutputRequest,
   validateGenerateContentOutputDemoRequest,
@@ -29,6 +30,11 @@ router.post(
   "/generate",
   validateGenerateContentOutputRequest,
   contentOutputsController.generateContentOutput
+);
+router.post(
+  "/auto-generate",
+  validateAutoGenerateContentOutputsRequest,
+  contentOutputsController.autoGenerateContentOutputs
 );
 router.post(
   "/generate-demo",

@@ -1,4 +1,5 @@
 const {
+  normalizeAutoGenerateContentOutputsPayload,
   normalizeContentOutputPayload,
   normalizeGenerateContentOutputDemoPayload,
 } = require("../services/contentOutputsService");
@@ -44,6 +45,40 @@ function validateGenerateContentOutputRequest(req, res, next) {
     }
 
     req.contentOutputInput = contentOutputInput;
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+function validateAutoGenerateContentOutputsRequest(req, res, next) {
+  try {
+    const contentOutputAutoGenerateInput = normalizeAutoGenerateContentOutputsPayload(req.body);
+
+    if (!contentOutputAutoGenerateInput.contentPillarId) {
+      throw createHttpError("Missing required field: contentPillarId", 400);
+    }
+
+    if (contentOutputAutoGenerateInput.targetCount === undefined || contentOutputAutoGenerateInput.targetCount === null) {
+      throw createHttpError("Missing required field: targetCount", 400);
+    }
+
+    if (!Number.isInteger(contentOutputAutoGenerateInput.targetCount)) {
+      throw createHttpError("targetCount must be an integer", 400);
+    }
+
+    if (contentOutputAutoGenerateInput.targetCount < 1 || contentOutputAutoGenerateInput.targetCount > 20) {
+      throw createHttpError("targetCount must be between 1 and 20", 400);
+    }
+
+    if (
+      contentOutputAutoGenerateInput.scheduledAt &&
+      Number.isNaN(Date.parse(contentOutputAutoGenerateInput.scheduledAt))
+    ) {
+      throw createHttpError("scheduledAt must be a valid date-time string", 400);
+    }
+
+    req.contentOutputAutoGenerateInput = contentOutputAutoGenerateInput;
     next();
   } catch (error) {
     next(error);
@@ -100,6 +135,7 @@ function validateContentOutputIdParam(req, res, next) {
 
 module.exports = {
   validateContentOutputIdParam,
+  validateAutoGenerateContentOutputsRequest,
   validateCreateContentOutputRequest,
   validateGenerateContentOutputDemoRequest,
   validateGenerateContentOutputRequest,

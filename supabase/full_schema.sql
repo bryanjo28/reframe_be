@@ -16,6 +16,8 @@ CREATE TABLE public.content_outputs (
   user_id uuid NOT NULL,
   persona_config_id uuid NOT NULL,
   topic_id uuid,
+  scheduled_job_id uuid,
+  scheduled_job_run_id uuid,
   platform text DEFAULT 'threads'::text,
   format_output text,
   content text NOT NULL,
@@ -30,6 +32,8 @@ CREATE TABLE public.content_outputs (
   CONSTRAINT content_outputs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
   CONSTRAINT content_outputs_persona_config_id_fkey FOREIGN KEY (persona_config_id) REFERENCES public.persona_configs(id),
   CONSTRAINT content_outputs_topic_id_fkey FOREIGN KEY (topic_id) REFERENCES public.content_topics(id),
+  CONSTRAINT content_outputs_scheduled_job_id_fkey FOREIGN KEY (scheduled_job_id) REFERENCES public.scheduled_jobs(id),
+  CONSTRAINT content_outputs_scheduled_job_run_id_fkey FOREIGN KEY (scheduled_job_run_id) REFERENCES public.scheduled_job_runs(id),
   CONSTRAINT content_outputs_content_pillar_id_fkey FOREIGN KEY (content_pillar_id) REFERENCES public.content_pillars(id)
 );
 CREATE TABLE public.content_pillars (
@@ -73,6 +77,7 @@ CREATE TABLE public.generation_logs (
   user_id uuid NOT NULL,
   persona_config_id uuid,
   topic_id uuid,
+  scheduled_job_run_id uuid,
   input_payload jsonb,
   output_payload jsonb,
   status text DEFAULT 'success'::text,
@@ -81,7 +86,8 @@ CREATE TABLE public.generation_logs (
   CONSTRAINT generation_logs_pkey PRIMARY KEY (id),
   CONSTRAINT generation_logs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
   CONSTRAINT generation_logs_persona_config_id_fkey FOREIGN KEY (persona_config_id) REFERENCES public.persona_configs(id),
-  CONSTRAINT generation_logs_topic_id_fkey FOREIGN KEY (topic_id) REFERENCES public.content_topics(id)
+  CONSTRAINT generation_logs_topic_id_fkey FOREIGN KEY (topic_id) REFERENCES public.content_topics(id),
+  CONSTRAINT generation_logs_scheduled_job_run_id_fkey FOREIGN KEY (scheduled_job_run_id) REFERENCES public.scheduled_job_runs(id)
 );
 CREATE TABLE public.generation_topic_logs (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -170,17 +176,44 @@ CREATE TABLE public.scheduled_jobs (
   user_id uuid NOT NULL,
   persona_config_id uuid NOT NULL,
   prompt_template_id uuid,
+  job_type text NOT NULL DEFAULT 'generate_content_from_topics'::text,
+  config jsonb NOT NULL DEFAULT '{}'::jsonb,
+  target_count integer NOT NULL DEFAULT 10,
   schedule_type text,
   schedule_value text,
+  schedule_timezone text DEFAULT 'Asia/Jakarta'::text,
   status text DEFAULT 'active'::text,
   last_run_at timestamp without time zone,
   next_run_at timestamp without time zone,
+  last_run_status text,
+  last_run_generated_count integer NOT NULL DEFAULT 0,
+  last_run_error text,
   created_at timestamp without time zone DEFAULT now(),
   error_message text,
   CONSTRAINT scheduled_jobs_pkey PRIMARY KEY (id),
   CONSTRAINT scheduled_jobs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
   CONSTRAINT scheduled_jobs_persona_config_id_fkey FOREIGN KEY (persona_config_id) REFERENCES public.persona_configs(id),
   CONSTRAINT scheduled_jobs_prompt_template_id_fkey FOREIGN KEY (prompt_template_id) REFERENCES public.prompt_templates(id)
+);
+CREATE TABLE public.scheduled_job_runs (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  scheduled_job_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  status text NOT NULL DEFAULT 'running'::text,
+  target_count integer NOT NULL DEFAULT 10,
+  fetched_count integer NOT NULL DEFAULT 0,
+  processed_count integer NOT NULL DEFAULT 0,
+  success_count integer NOT NULL DEFAULT 0,
+  failed_count integer NOT NULL DEFAULT 0,
+  run_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  result_payload jsonb,
+  error_message text,
+  started_at timestamp with time zone NOT NULL DEFAULT now(),
+  finished_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT scheduled_job_runs_pkey PRIMARY KEY (id),
+  CONSTRAINT scheduled_job_runs_scheduled_job_id_fkey FOREIGN KEY (scheduled_job_id) REFERENCES public.scheduled_jobs(id),
+  CONSTRAINT scheduled_job_runs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
 );
 CREATE TABLE public.social_accounts (
   id uuid NOT NULL DEFAULT gen_random_uuid(),

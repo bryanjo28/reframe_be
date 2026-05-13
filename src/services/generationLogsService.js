@@ -114,6 +114,10 @@ function normalizeGenerationLogPayload(payload = {}) {
   return {
     personaConfigId: readOptionalText(source, ["personaConfigId", "persona_config_id"]),
     topicId: readOptionalText(source, ["topicId", "topic_id"]),
+    scheduledJobRunId: readOptionalText(
+      source,
+      ["scheduledJobRunId", "scheduled_job_run_id"]
+    ),
     inputPayload: readOptionalJson(source, ["inputPayload", "input_payload"]),
     outputPayload: readOptionalJson(source, ["outputPayload", "output_payload"]),
     status: readOptionalText(source, ["status"]),
@@ -131,6 +135,7 @@ function mapGenerationLogRow(row) {
     userId: row.user_id,
     personaConfigId: row.persona_config_id,
     topicId: row.topic_id,
+    scheduledJobRunId: row.scheduled_job_run_id,
     inputPayload: row.input_payload,
     outputPayload: row.output_payload,
     status: row.status,
@@ -152,6 +157,7 @@ async function createGenerationLog({ supabase, userId, payload }) {
     user_id: userId,
     persona_config_id: input.personaConfigId || null,
     topic_id: input.topicId || null,
+    scheduled_job_run_id: input.scheduledJobRunId || null,
     input_payload: input.inputPayload || null,
     output_payload: input.outputPayload || null,
     status: input.status || "success",
