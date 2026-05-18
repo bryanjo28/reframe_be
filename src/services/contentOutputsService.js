@@ -1,4 +1,5 @@
 const { isSupabaseConfigured } = require("../config/supabase");
+const promptTemplatesService = require("./promptTemplatesService");
 const sumopodService = require("./sumopodService");
 const { createGenerationLog } = require("./generationLogsService");
 const {
@@ -93,6 +94,7 @@ function normalizeContentOutputPayload(payload = {}) {
       source,
       ["scheduledJobRunId", "scheduled_job_run_id"]
     ),
+    promptTemplateId: readOptionalText(source, ["promptTemplateId", "prompt_template_id"]),
     platform: readOptionalText(source, ["platform"]),
     formatOutput: readOptionalText(source, ["formatOutput", "format_output"]),
     content: readOptionalText(source, ["content"]),
@@ -101,6 +103,7 @@ function normalizeContentOutputPayload(payload = {}) {
     externalPostId: readOptionalText(source, ["externalPostId", "external_post_id"]),
     retryCount: readOptionalNumber(source, ["retryCount", "retry_count"]),
     additionalPrompt: readOptionalText(source, ["additionalPrompt", "additional_prompt"]),
+    improvementHint: readOptionalText(source, ["improvementHint", "improvement_hint"]),
     regenerate: readOptionalBoolean(source, ["regenerate"]),
     sourceContentOutputId: readOptionalText(
       source,
@@ -314,6 +317,7 @@ function buildDefaultDraft({
   platform,
   formatOutput,
   additionalPrompt,
+  improvementHint,
 }) {
   const personaName = persona?.persona || "persona yang sudah disetel";
   const topicText = topic?.topic || "topik umum";
@@ -322,6 +326,7 @@ function buildDefaultDraft({
   const tone = persona?.tone || "natural";
   const targetAudience = persona?.targetAudience || "audiens target";
   const addOn = additionalPrompt ? ` Instruksi tambahan: ${additionalPrompt}.` : "";
+  const hint = improvementHint ? ` Fokus perbaikan: ${improvementHint}.` : "";
 
   return [
     `Buat konten ${platform || "threads"} dalam format ${formatOutput || "single post"}.`,
@@ -330,7 +335,7 @@ function buildDefaultDraft({
     `Objective: ${pillarObjective}.`,
     `Target audience: ${targetAudience}.`,
     `Topik: ${topicText}.`,
-    `Tone: ${tone}.${addOn}`,
+    `Tone: ${tone}.${addOn}${hint}`,
     "Draft awal ini bisa diedit lagi sebelum publish.",
   ].join(" ");
 }
@@ -482,6 +487,7 @@ function buildContentOutputUserPrompt({
   persona,
   topic,
   contentPillar,
+  promptTemplate,
   promptContext,
   sourceContentOutput,
 }) {
@@ -520,6 +526,9 @@ function buildContentOutputUserPrompt({
       : "",
     promptContext.additionalPrompt
       ? `Instruksi tambahan dari user: ${promptContext.additionalPrompt}`
+      : "",
+    promptContext.improvementHint
+      ? `Fokus perbaikan: ${promptContext.improvementHint}`
       : "",
     "",
     "Output requirements:",
@@ -862,7 +871,30 @@ function buildPromptContext({ persona, topic, contentPillar, sourceContentOutput
     platform: input.platform || persona?.platform || "threads",
     formatOutput: input.formatOutput || persona?.format_output || "single post",
     additionalPrompt: input.additionalPrompt || "",
+    improvementHint: input.improvementHint || "",
     previousContent: sourceContentOutput?.content || "",
+  };
+}
+
+function resolvePromptTemplate(promptTemplate, context) {
+  if (!promptTemplate) {
+    return null;
+  }
+
+  const variables =
+    promptTemplate.variables && typeof promptTemplate.variables === "object"
+      ? promptTemplate.variables
+      : {};
+
+  const resolvedTemplate = interpolateTemplate(promptTemplate.template, variables, context);
+
+  return {
+    id: promptTemplate.id,
+    name: promptTemplate.name,
+    template: promptTemplate.template,
+    resolvedTemplate,
+    variables: promptTemplate.variables || null,
+    isGlobal: promptTemplate.isGlobal,
   };
 }
 
@@ -971,6 +1003,7 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
   let persona = null;
   let contentPillar = null;
   let sourceContentOutput = null;
+  let promptTemplate = null;
   let resolvedPersonaConfigId = workingInput.personaConfigId || null;
 
   try {
@@ -1000,6 +1033,14 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
       sourceContentOutputId: workingInput.sourceContentOutputId,
     });
 
+    if (workingInput.promptTemplateId) {
+      promptTemplate = await promptTemplatesService.getPromptTemplateById({
+        supabase,
+        userId,
+        id: workingInput.promptTemplateId,
+      });
+    }
+
     const promptContext = buildPromptContext({
       persona,
       topic,
@@ -1008,11 +1049,13 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
       input: workingInput,
     });
 
+    const resolvedPromptTemplate = resolvePromptTemplate(promptTemplate, promptContext);
     const systemPrompt = buildContentOutputSystemPrompt();
     const userPrompt = buildContentOutputUserPrompt({
       persona,
       topic,
       contentPillar,
+      promptTemplate: resolvedPromptTemplate,
       promptContext,
       sourceContentOutput,
     });
@@ -1020,6 +1063,7 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
     logContentOutputGenerationDebug("prompt", {
       systemPrompt,
       userPrompt,
+      promptTemplate: resolvedPromptTemplate,
       promptContext,
     });
 
@@ -1040,6 +1084,7 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
       platform: workingInput.platform || promptContext.platform,
       formatOutput: workingInput.formatOutput || promptContext.formatOutput,
       additionalPrompt: workingInput.additionalPrompt,
+      improvementHint: workingInput.improvementHint,
     });
 
     logContentOutputGenerationDebug("sumopod_response", {
@@ -1102,6 +1147,7 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
           ...workingInput,
           personaConfigId: resolvedPersonaConfigId,
           topicId: topic.id,
+          promptTemplate: resolvedPromptTemplate,
           promptContext,
           sourceContentOutputId: workingInput.sourceContentOutputId || null,
           startedAt: generationStartedAt,
@@ -1120,6 +1166,7 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
 
     return {
       contentOutput,
+      promptTemplate: resolvedPromptTemplate,
       generationLog,
       generated: true,
       topic,
@@ -1135,11 +1182,12 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
           topicId: topic?.id || workingInput.topicId || null,
           scheduledJobRunId: workingInput.scheduledJobRunId || null,
           inputPayload: {
-          ...workingInput,
-          personaConfigId: resolvedPersonaConfigId || workingInput.personaConfigId || null,
-          topicId: topic?.id || workingInput.topicId || null,
-          sourceContentOutputId: workingInput.sourceContentOutputId || null,
-          startedAt: generationStartedAt,
+            ...workingInput,
+            personaConfigId: resolvedPersonaConfigId || workingInput.personaConfigId || null,
+            topicId: topic?.id || workingInput.topicId || null,
+            promptTemplateId: workingInput.promptTemplateId || null,
+            sourceContentOutputId: workingInput.sourceContentOutputId || null,
+            startedAt: generationStartedAt,
           },
           outputPayload: null,
           status: "failed",

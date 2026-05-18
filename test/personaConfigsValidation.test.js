@@ -35,17 +35,17 @@ run("normalizePersonaConfigPayload maps schema fields", () => {
   assert.equal(payload.isActive, false);
 });
 
-run("validateCreatePersonaConfigRequest rejects empty persona", () => {
-  const req = { body: { persona: "   " } };
+run("validateCreatePersonaConfigRequest allows partial persona config payload", () => {
+  const req = { body: { persona: "   ", tone: "friendly" } };
   let receivedError = null;
 
   validateCreatePersonaConfigRequest(req, {}, (error) => {
     receivedError = error;
   });
 
-  assert.ok(receivedError);
-  assert.equal(receivedError.status, 400);
-  assert.equal(receivedError.message, "Missing required field: persona");
+  assert.ok(receivedError == null);
+  assert.ok(req.personaConfigInput.persona == null);
+  assert.equal(req.personaConfigInput.tone, "friendly");
 });
 
 run("validatePersonaConfigIdParam rejects invalid uuid", () => {

@@ -6,6 +6,7 @@ const threadsController = require("../controllers/threadsController");
 const router = express.Router();
 
 router.get("/connect", authMiddleware, threadsController.getConnectUrl);
+router.post("/connect", authMiddleware, threadsController.getConnectUrl);
 router.get("/callback", threadsController.handleThreadsCallback);
 
 router.post("/post", async (req, res) => {
