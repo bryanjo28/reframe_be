@@ -190,3 +190,53 @@ Use this content pillar:
 
 Generate 10 content topics.
 `;
+
+
+Sudah saya buat.
+
+Sekarang alurnya jadi 2 API:
+
+POST /api/threads/auto-post
+Ini buat schedule dulu
+Payload:
+{
+  "personaConfigId": "uuid-persona",
+  "limit": 5,
+  "scheduledAt": "2026-06-04T09:00:00+07:00"
+}
+Yang dilakukan:
+bikin row di scheduled_jobs
+isi job_type = threads_auto_post
+isi schedule_type = once
+isi schedule_value = scheduledAt
+update content_outputs yang approved dan threads
+set scheduled_at
+set scheduled_job_id
+POST /api/threads/auto-post/run
+Ini buat jalanin job
+Payload:
+{
+  "scheduledJobId": "uuid-job"
+}
+Yang dilakukan:
+baca job dari scheduled_jobs
+bikin row di scheduled_job_runs
+ambil content_outputs yang sudah waktunya, urut scheduled_at ASC lalu created_at ASC
+claim item dengan scheduled_job_run_id supaya nggak dobel
+publish satu per satu ke Threads
+sukses -> posted
+gagal -> failed
+Yang saya tambahkan ada di:
+
+[src/routes/threadsRoutes.js](D:\project BCA\threads_api\src\routes\threadsRoutes.js)
+[src/services/threadsPublishService.js](D:\project BCA\threads_api\src\services\threadsPublishService.js)
+[src/controllers/threadsController.js](D:\project BCA\threads_api\src\controllers\threadsController.js)
+[src/middlewares/threadsPublishValidationMiddleware.js](D:\project BCA\threads_api\src\middlewares\threadsPublishValidationMiddleware.js)
+Saya juga sudah cek modulnya load dengan normal.
+
+Kalau kamu mau, next saya bisa bantu bikin contoh sequence request Postman:
+
+schedule job
+cek scheduled_jobs hasilnya
+run job
+cek content_outputs berubah jadi posted

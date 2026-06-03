@@ -45,6 +45,23 @@ async function me(req, res, next) {
   }
 }
 
+async function meThreads(req, res, next) {
+  try {
+    const result = await authService.getCurrentUserThreadsConnection({
+      user: req.user,
+      supabase: req.supabase,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Threads connection fetched successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function updateMe(req, res, next) {
   try {
     const data = await authService.updateCurrentUserProfile({
@@ -103,6 +120,7 @@ module.exports = {
   changePassword,
   login,
   me,
+  meThreads,
   logout,
   register,
   updateMe,

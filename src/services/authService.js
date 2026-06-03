@@ -11,6 +11,19 @@ function createHttpError(message, status = 500, details) {
   return error;
 }
 
+function isAuthDebugEnabled() {
+  const value = String(process.env.AUTH_DEBUG || "").trim().toLowerCase();
+  return value === "true" || value === "1" || value === "yes";
+}
+
+function debugAuthLog(label, payload) {
+  if (!isAuthDebugEnabled()) {
+    return;
+  }
+
+  console.log(`[auth-debug] ${label}`, payload);
+}
+
 function getFirstDefined(payload, keys) {
   const source = payload && typeof payload === "object" ? payload : {};
 
@@ -85,6 +98,151 @@ function normalizeProfile(profile) {
     createdAt: profile.created_at,
     role: profile.role,
   };
+}
+
+function buildThreadsConnectionStatus(row) {
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+
+  if (!row) {
+    return {
+      connected: false,
+      canUseToken: false,
+      needsReconnect: false,
+      status: "disconnected",
+      reason: "No saved token found.",
+      accountId: null,
+      threadsId: null,
+      expiresAt: null,
+      remainingSeconds: 0,
+      updatedAt: null,
+      checkedAt: nowIso,
+    };
+  }
+
+  const accessToken = typeof row.access_token === "string" ? row.access_token.trim() : row.access_token;
+  const expiresAt = row.expires_at || null;
+
+  if (!accessToken) {
+    return {
+      connected: false,
+      canUseToken: false,
+      needsReconnect: true,
+      status: "needs_reconnect",
+      reason: "Saved token is missing.",
+      accountId: row.username || null,
+      threadsId: row.platform_user_id || null,
+      expiresAt,
+      remainingSeconds: 0,
+      updatedAt: row.updated_at || null,
+      checkedAt: nowIso,
+    };
+  }
+
+  if (!expiresAt) {
+    return {
+      connected: false,
+      canUseToken: false,
+      needsReconnect: true,
+      status: "needs_reconnect",
+      reason: "Saved token has no expiry metadata.",
+      accountId: row.username || null,
+      threadsId: row.platform_user_id || null,
+      expiresAt: null,
+      remainingSeconds: 0,
+      updatedAt: row.updated_at || null,
+      checkedAt: nowIso,
+    };
+  }
+
+  const expiresAtTime = new Date(expiresAt).getTime();
+
+  if (!Number.isFinite(expiresAtTime)) {
+    return {
+      connected: false,
+      canUseToken: false,
+      needsReconnect: true,
+      status: "needs_reconnect",
+      reason: "Saved token has invalid expiry metadata.",
+      accountId: row.username || null,
+      threadsId: row.platform_user_id || null,
+      expiresAt,
+      remainingSeconds: 0,
+      updatedAt: row.updated_at || null,
+      checkedAt: nowIso,
+    };
+  }
+
+  const remainingSeconds = Math.max(0, Math.floor((expiresAtTime - now) / 1000));
+  const isConnected = expiresAtTime > now;
+
+  return {
+    connected: isConnected,
+    canUseToken: isConnected,
+    needsReconnect: !isConnected,
+    status: isConnected ? "connected" : "needs_reconnect",
+    reason: isConnected ? null : "Saved token has expired.",
+    accountId: row.username || null,
+    threadsId: row.platform_user_id || null,
+    expiresAt,
+    remainingSeconds: isConnected ? remainingSeconds : 0,
+    updatedAt: row.updated_at || null,
+    checkedAt: nowIso,
+  };
+}
+
+function normalizeThreadsConnection(row) {
+  return buildThreadsConnectionStatus(row);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getThreadsConnectionStatus({ supabase, userId }) {
+  const maxAttempts = 3;
+  const retryDelayMs = 250;
+  let lastError = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const { data, error } = await supabase
+      .from("social_accounts")
+      .select("access_token, username, platform_user_id, expires_at, updated_at")
+      .eq("user_id", userId)
+      .eq("platform", "threads")
+      .maybeSingle();
+
+    if (error) {
+      lastError = error;
+      break;
+    }
+
+    if (data) {
+      const normalized = normalizeThreadsConnection(data);
+      debugAuthLog("threads-connection-row", {
+        userId,
+        raw: data,
+        normalized,
+      });
+      return normalized;
+    }
+
+    if (attempt < maxAttempts - 1) {
+      await sleep(retryDelayMs);
+    }
+  }
+
+  if (lastError) {
+    throw createHttpError(lastError.message, 500, lastError);
+  }
+
+  const normalized = normalizeThreadsConnection(null);
+  debugAuthLog("threads-connection-row", {
+    userId,
+    raw: null,
+    normalized,
+  });
+  return normalized;
 }
 
 function normalizeUpdateProfilePayload(payload = {}) {
@@ -279,11 +437,25 @@ async function getCurrentUserProfile({ user, supabase }) {
     .from("profiles")
     .select("id, account_name, full_name, created_at, role")
     .eq("id", user.id)
-    .single();
+    .maybeSingle();
 
   if (error) {
     throw createHttpError(error.message, 500, error);
   }
+
+  const threadsConnection = await getThreadsConnectionStatus({
+    supabase,
+    userId: user.id,
+  });
+
+  debugAuthLog("me-response", {
+    userId: user.id,
+    email: user.email,
+    profile: normalizeProfile(data),
+    socialAccounts: {
+      threads: threadsConnection,
+    },
+  });
 
   return {
     user: {
@@ -291,7 +463,25 @@ async function getCurrentUserProfile({ user, supabase }) {
       email: user.email,
     },
     profile: normalizeProfile(data),
+    socialAccounts: {
+      threads: threadsConnection,
+    },
   };
+}
+
+async function getCurrentUserThreadsConnection({ user, supabase }) {
+  const threadsConnection = await getThreadsConnectionStatus({
+    supabase,
+    userId: user.id,
+  });
+
+  debugAuthLog("me-threads-response", {
+    userId: user.id,
+    email: user.email,
+    threads: threadsConnection,
+  });
+
+  return threadsConnection;
 }
 
 async function updateCurrentUserProfile({ user, supabase, payload }) {
@@ -386,9 +576,13 @@ module.exports = {
   assertRequiredAuthFields,
   changePassword,
   getCurrentUserProfile,
+  getCurrentUserThreadsConnection,
   login,
   normalizeAuthPayload,
+  normalizeThreadsConnection,
   logout,
+  getThreadsConnectionStatus,
   register,
   updateCurrentUserProfile,
+  buildThreadsConnectionStatus,
 };

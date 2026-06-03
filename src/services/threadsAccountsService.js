@@ -80,26 +80,40 @@ function mapThreadsAccountRow(row) {
 }
 
 function buildInsertPayload({ userId, input }) {
-  return {
+  const payload = {
     user_id: userId,
     platform: "threads",
     access_token: input.accessToken,
-    refresh_token: input.refreshToken ?? null,
-    expires_at: input.expiresAt ?? null,
     platform_user_id: input.threadsId,
     username: input.accountId,
   };
+
+  if (input.refreshToken !== undefined) {
+    payload.refresh_token = input.refreshToken;
+  }
+
+  if (input.expiresAt !== undefined) {
+    payload.expires_at = input.expiresAt;
+  }
+
+  return payload;
 }
 
 function buildUpdatePayload(input) {
   const payload = {
     access_token: input.accessToken,
     platform: "threads",
-    refresh_token: input.refreshToken ?? null,
-    expires_at: input.expiresAt ?? null,
     platform_user_id: input.threadsId,
     username: input.accountId,
   };
+
+  if (input.refreshToken !== undefined) {
+    payload.refresh_token = input.refreshToken;
+  }
+
+  if (input.expiresAt !== undefined) {
+    payload.expires_at = input.expiresAt;
+  }
 
   return payload;
 }

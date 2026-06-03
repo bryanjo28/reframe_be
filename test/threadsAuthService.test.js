@@ -5,6 +5,16 @@ require("dotenv").config();
 
 const threadsAuthService = require("../src/services/threadsAuthService");
 
+function loadFreshThreadsAuthService() {
+  const threadsAuthServicePath = require.resolve("../src/services/threadsAuthService");
+  const supabaseConfigPath = require.resolve("../src/config/supabase");
+
+  delete require.cache[threadsAuthServicePath];
+  delete require.cache[supabaseConfigPath];
+
+  return require("../src/services/threadsAuthService");
+}
+
 function run(name, fn) {
   return Promise.resolve()
     .then(fn)
@@ -94,12 +104,16 @@ async function main() {
 
   await run("handleCallback exchanges tokens and stores account data", async () => {
     const restoreFetch = mockFetch();
+    const originalServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "";
+
+    const freshThreadsAuthService = loadFreshThreadsAuthService();
 
     try {
       const userId = crypto.randomUUID();
-      const connect = threadsAuthService.createAuthorizationRequest({ userId });
+      const connect = freshThreadsAuthService.createAuthorizationRequest({ userId });
 
-      const result = await threadsAuthService.handleCallback({
+      const result = await freshThreadsAuthService.handleCallback({
         code: "test_code_123",
         state: connect.state,
       });
@@ -116,6 +130,8 @@ async function main() {
       assert.equal(result.tokenRecord.accessToken, "long_lived_test_token");
       assert.equal(result.tokenRecord.threadsUserId, "threads_user_123");
     } finally {
+      process.env.SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey;
+      loadFreshThreadsAuthService();
       restoreFetch();
     }
   });

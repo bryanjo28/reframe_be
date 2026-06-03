@@ -38,6 +38,10 @@ function readOptionalText(source, keys) {
   }
 
   const text = String(value).trim();
+  if (!text || text.toLowerCase() === "null" || text.toLowerCase() === "undefined") {
+    return undefined;
+  }
+
   return text.length > 0 ? text : null;
 }
 
@@ -239,52 +243,12 @@ function buildInsertPayload({ userId, input }) {
 function buildUpdatePayload(input) {
   const payload = {};
 
-  if (input.personaConfigId !== undefined) {
-    payload.persona_config_id = input.personaConfigId;
-  }
-
-  if (input.contentPillarId !== undefined) {
-    payload.content_pillar_id = input.contentPillarId;
-  }
-
-  if (input.topicId !== undefined) {
-    payload.topic_id = input.topicId;
-  }
-
-  if (input.scheduledJobId !== undefined) {
-    payload.scheduled_job_id = input.scheduledJobId;
-  }
-
-  if (input.scheduledJobRunId !== undefined) {
-    payload.scheduled_job_run_id = input.scheduledJobRunId;
-  }
-
-  if (input.platform !== undefined) {
-    payload.platform = input.platform;
-  }
-
-  if (input.formatOutput !== undefined) {
-    payload.format_output = input.formatOutput;
-  }
-
   if (input.content !== undefined) {
     payload.content = input.content;
   }
 
   if (input.status !== undefined) {
     payload.status = input.status;
-  }
-
-  if (input.scheduledAt !== undefined) {
-    payload.scheduled_at = input.scheduledAt;
-  }
-
-  if (input.externalPostId !== undefined) {
-    payload.external_post_id = input.externalPostId;
-  }
-
-  if (input.retryCount !== undefined) {
-    payload.retry_count = input.retryCount;
   }
 
   return payload;
@@ -1482,31 +1446,6 @@ async function updateContentOutput({ supabase, userId, id, payload }) {
     throw createHttpError("No valid fields to update", 400);
   }
 
-  if (input.personaConfigId !== undefined) {
-    await assertPersonaConfigBelongsToUser({
-      supabase,
-      userId,
-      personaConfigId: input.personaConfigId,
-    });
-  }
-
-  const topic = await assertTopicBelongsToUserAndPersona({
-    supabase,
-    userId,
-    topicId: input.topicId,
-    personaConfigId: input.personaConfigId,
-  });
-
-  if (input.contentPillarId !== undefined || topic?.content_pillar_id) {
-    await resolveContentPillarForOutput({
-      supabase,
-      userId,
-      personaConfigId: input.personaConfigId,
-      topic,
-      contentPillarId: input.contentPillarId,
-    });
-  }
-
   const { data, error } = await supabase
     .from("content_outputs")
     .update(updatePayload)
@@ -1555,6 +1494,7 @@ async function deleteContentOutput({ supabase, userId, id }) {
 
 module.exports = {
   createContentOutput,
+  createScheduledJobRun,
   deleteContentOutput,
   autoGenerateContentOutputs,
   generateContentOutputDemo,
@@ -1565,4 +1505,5 @@ module.exports = {
   normalizeContentOutputPayload,
   normalizeGenerateContentOutputDemoPayload,
   updateContentOutput,
+  updateScheduledJobRun,
 };

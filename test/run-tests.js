@@ -2,5 +2,8 @@ require("./authValidation.test");
 require("./contentPillarsValidation.test");
 require("./contentTopicsGeneration.test");
 require("./personaConfigsValidation.test");
+require("./authService.test");
 require("./threadsAccountsValidation.test");
 require("./threadsAuthService.test");
+require("./threadsPublishValidation.test");
+require("./scheduledJobsValidation.test");

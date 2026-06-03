@@ -304,5 +304,6 @@ module.exports = {
   exchangeForLongLivedToken,
   exchangeCodeForShortLivedToken,
   handleCallback,
+  getThreadsUser,
   refreshLongLivedToken,
 };
