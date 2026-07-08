@@ -1,5 +1,6 @@
 const { isSupabaseConfigured } = require("../config/supabase");
 const sumopodService = require("./sumopodService");
+const { consumeMonthlyAiCredits } = require("./subscriptionUsageService");
 
 function createHttpError(message, status = 500, details) {
   const error = new Error(message);
@@ -767,6 +768,12 @@ async function enhanceContentPillarWithAi({
     ],
   });
 
+  const subscriptionUsage = await consumeMonthlyAiCredits({
+    supabase,
+    userId,
+    usage: result.raw?.usage || null,
+  });
+
   return {
     contentPillar,
     enhancementInput,
@@ -775,6 +782,7 @@ async function enhanceContentPillarWithAi({
     aiEnhancedVersion: result.content,
     prompt,
     systemPrompt,
+    subscriptionUsage,
   };
 }
 

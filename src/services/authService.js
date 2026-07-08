@@ -1,4 +1,10 @@
-﻿const { createSupabaseUserClient, isSupabaseConfigured, supabase } = require("../config/supabase");
+﻿const {
+  createSupabaseUserClient,
+  isSupabaseAdminConfigured,
+  isSupabaseConfigured,
+  supabase,
+  supabaseAdmin,
+} = require("../config/supabase");
 
 function createHttpError(message, status = 500, details) {
   const error = new Error(message);
@@ -327,6 +333,68 @@ function normalizeAuthResponse({ user, session, profile }) {
   };
 }
 
+async function ensureFreeSubscriptionForUser({ userId }) {
+  if (!isSupabaseAdminConfigured || !supabaseAdmin) {
+    throw createHttpError(
+      "Supabase admin client is not configured. Fill SUPABASE_SERVICE_ROLE_KEY first.",
+      500
+    );
+  }
+
+  if (!userId) {
+    throw createHttpError("Missing required field: userId", 400);
+  }
+
+  const { data: existingSubscription, error: existingSubscriptionError } = await supabaseAdmin
+    .from("user_subscriptions")
+    .select("id, user_id, plan_id, status, started_at, ends_at, created_at, updated_at")
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .maybeSingle();
+
+  if (existingSubscriptionError) {
+    throw createHttpError(existingSubscriptionError.message, 400, existingSubscriptionError);
+  }
+
+  if (existingSubscription) {
+    return existingSubscription;
+  }
+
+  const { data: freePlan, error: freePlanError } = await supabaseAdmin
+    .from("subscription_plans")
+    .select("id, code, name, max_personas, monthly_ai_credits, is_active")
+    .eq("code", "free")
+    .maybeSingle();
+
+  if (freePlanError) {
+    throw createHttpError(freePlanError.message, 400, freePlanError);
+  }
+
+  if (!freePlan) {
+    throw createHttpError("Free subscription plan not found", 404);
+  }
+
+  if (!freePlan.is_active) {
+    throw createHttpError("Free subscription plan is inactive", 403);
+  }
+
+  const { data: createdSubscription, error: createSubscriptionError } = await supabaseAdmin
+    .from("user_subscriptions")
+    .insert({
+      user_id: userId,
+      plan_id: freePlan.id,
+      status: "active",
+    })
+    .select("id, user_id, plan_id, status, started_at, ends_at, created_at, updated_at")
+    .single();
+
+  if (createSubscriptionError) {
+    throw createHttpError(createSubscriptionError.message, 400, createSubscriptionError);
+  }
+
+  return createdSubscription;
+}
+
 async function getProfileByUserId({ userId, accessToken }) {
   const userClient = createSupabaseUserClient(accessToken);
 
@@ -390,6 +458,10 @@ async function register({ email, password, accountName, fullName }) {
       })
     : null;
 
+  await ensureFreeSubscriptionForUser({
+    userId: signUpData.user.id,
+  });
+
   return {
     ...normalizeAuthResponse({
       user: signUpData.user,
@@ -423,6 +495,10 @@ async function login({ email, password }) {
   const profile = await getProfileByUserId({
     userId: data.user.id,
     accessToken: data.session?.access_token,
+  });
+
+  await ensureFreeSubscriptionForUser({
+    userId: data.user.id,
   });
 
   return normalizeAuthResponse({
@@ -575,6 +651,7 @@ async function logout({ supabase }) {
 module.exports = {
   assertRequiredAuthFields,
   changePassword,
+  ensureFreeSubscriptionForUser,
   getCurrentUserProfile,
   getCurrentUserThreadsConnection,
   login,
@@ -586,3 +663,4 @@ module.exports = {
   updateCurrentUserProfile,
   buildThreadsConnectionStatus,
 };
+

@@ -108,11 +108,30 @@ function readOptionalJson(source, keys) {
   return null;
 }
 
+function readOptionalNumber(source, keys) {
+  if (!hasKey(source, keys)) {
+    return undefined;
+  }
+
+  const matchedKey = keys.find((key) => Object.prototype.hasOwnProperty.call(source, key));
+  const value = source[matchedKey];
+
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
 function normalizeGenerationLogPayload(payload = {}) {
   const source = getSource(payload);
 
   return {
     personaConfigId: readOptionalText(source, ["personaConfigId", "persona_config_id"]),
+    promptTokens: readOptionalNumber(source, ["promptTokens", "prompt_tokens"]),
+    completionTokens: readOptionalNumber(source, ["completionTokens", "completion_tokens"]),
+    totalTokens: readOptionalNumber(source, ["totalTokens", "total_tokens"]),
     topicId: readOptionalText(source, ["topicId", "topic_id"]),
     scheduledJobRunId: readOptionalText(
       source,
@@ -134,6 +153,9 @@ function mapGenerationLogRow(row) {
     id: row.id,
     userId: row.user_id,
     personaConfigId: row.persona_config_id,
+    promptTokens: row.prompt_tokens,
+    completionTokens: row.completion_tokens,
+    totalTokens: row.total_tokens,
     topicId: row.topic_id,
     scheduledJobRunId: row.scheduled_job_run_id,
     inputPayload: row.input_payload,
@@ -156,6 +178,9 @@ async function createGenerationLog({ supabase, userId, payload }) {
   const insertPayload = {
     user_id: userId,
     persona_config_id: input.personaConfigId || null,
+    prompt_tokens: input.promptTokens,
+    completion_tokens: input.completionTokens,
+    total_tokens: input.totalTokens,
     topic_id: input.topicId || null,
     scheduled_job_run_id: input.scheduledJobRunId || null,
     input_payload: input.inputPayload || null,

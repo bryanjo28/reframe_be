@@ -1,6 +1,8 @@
 const { isSupabaseConfigured } = require("../config/supabase");
 const sumopodService = require("./sumopodService");
 const { createGenerationTopicLog } = require("./generationTopicLogsService");
+const { consumeDailyGenerationHit } = require("./dailyGenerationUsageService");
+const { consumeMonthlyAiCredits } = require("./subscriptionUsageService");
 
 function createHttpError(message, status = 500, details) {
   const error = new Error(message);
@@ -316,6 +318,12 @@ async function generateContentTopics({ supabase, userId, payload }) {
   });
 
   try {
+    const dailyUsage = await consumeDailyGenerationHit({
+      supabase,
+      userId,
+      usageKey: "generate_topic",
+    });
+
     const result = await sumopodService.generateChatCompletion({
       model: "gpt-4o-mini",
       maxTokens: 1200,
@@ -335,6 +343,12 @@ async function generateContentTopics({ supabase, userId, payload }) {
     const parsedContent = parseGeneratedTopicsContent(result.content);
     const usage = getUsageFromResult(result);
     const topicCount = Array.isArray(parsedContent?.topics) ? parsedContent.topics.length : 0;
+
+    const subscriptionUsage = await consumeMonthlyAiCredits({
+      supabase,
+      userId,
+      usage: result.raw?.usage || null,
+    });
 
     const generationTopicLog = await createGenerationTopicLog({
       supabase,
@@ -358,6 +372,8 @@ async function generateContentTopics({ supabase, userId, payload }) {
         completion_tokens: usage.completionTokens,
         total_tokens: usage.totalTokens,
       },
+      daily_usage: dailyUsage,
+      subscription_usage: subscriptionUsage,
       generation_topic_log: generationTopicLog,
       request: {
         contentPillarId: input.contentPillarId,

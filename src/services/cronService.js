@@ -14,6 +14,7 @@ async function runDueScheduledJobs() {
     .from("scheduled_jobs")
     .select("id, user_id")
     .eq("status", "active")
+    .eq("job_type", "threads_auto_post")
     .lte("next_run_at", nowIso);
 
   if (error) {

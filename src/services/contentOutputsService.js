@@ -2,6 +2,8 @@ const { isSupabaseConfigured } = require("../config/supabase");
 const promptTemplatesService = require("./promptTemplatesService");
 const sumopodService = require("./sumopodService");
 const { createGenerationLog } = require("./generationLogsService");
+const { consumeDailyGenerationHit } = require("./dailyGenerationUsageService");
+const { consumeMonthlyAiCredits } = require("./subscriptionUsageService");
 const {
   assertContentPillarBelongsToUserAndPersona,
 } = require("./contentPillarsService");
@@ -1031,6 +1033,12 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
       promptContext,
     });
 
+    const dailyUsage = await consumeDailyGenerationHit({
+      supabase,
+      userId,
+      usageKey: "generate_content",
+    });
+
     const aiResult = await sumopodService.generateChatCompletion({
       model: workingInput.model || "gpt-4o-mini",
       maxTokens: workingInput.maxTokens || 1200,
@@ -1056,6 +1064,14 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
       raw: aiResult.raw,
       content: aiResult.content,
     });
+
+    const aiUsage = await consumeMonthlyAiCredits({
+      supabase,
+      userId,
+      usage: aiResult.raw?.usage || null,
+    });
+
+    const usage = aiResult?.raw?.usage || {};
 
     const insertPayload = buildInsertPayload({
       userId,
@@ -1121,9 +1137,14 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
           generatedContent,
           aiResponse: {
             model: aiResult.model,
-            usage: aiResult.raw?.usage || null,
+            usage,
+            dailyUsage,
+            subscriptionUsage: aiUsage,
           },
         },
+        promptTokens: usage.prompt_tokens || 0,
+        completionTokens: usage.completion_tokens || 0,
+        totalTokens: usage.total_tokens || 0,
         status: "success",
       },
     });
@@ -1154,6 +1175,9 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
             startedAt: generationStartedAt,
           },
           outputPayload: null,
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
           status: "failed",
           errorMessage: error.message,
         },
@@ -1403,6 +1427,12 @@ async function generateContentOutputDemo({ supabase, userId, payload }) {
     content: aiResult.content,
   });
 
+  const aiUsage = await consumeMonthlyAiCredits({
+    supabase,
+    userId,
+    usage: aiResult.raw?.usage || null,
+  });
+
   const parsedContent = parseGeneratedJsonContent(aiResult.content);
   if (Array.isArray(parsedContent?.threads) && parsedContent.threads.length > 3) {
     parsedContent.threads = parsedContent.threads.slice(0, 3);
@@ -1418,6 +1448,7 @@ async function generateContentOutputDemo({ supabase, userId, payload }) {
       completion_tokens: usage.completion_tokens || 0,
       total_tokens: usage.total_tokens || 0,
     },
+    subscriptionUsage: aiUsage,
     request: {
       personaConfigId: savedPersonaConfig?.id || null,
       persona: input.persona,

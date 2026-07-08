@@ -64,7 +64,7 @@ CREATE TABLE public.content_outputs (
   platform text DEFAULT 'threads'::text,
   format_output text,
   content text NOT NULL,
-  status USER-DEFINED DEFAULT 'draft'::content_status,
+  status USER-DEFINED,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   retry_count integer DEFAULT 0,
@@ -93,16 +93,21 @@ CREATE TABLE public.published_posts (
   status text DEFAULT 'success'::text,
   error_message text,
   created_at timestamp with time zone DEFAULT now(),
+  parent_published_post_id uuid,
   CONSTRAINT published_posts_pkey PRIMARY KEY (id),
   CONSTRAINT published_posts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
   CONSTRAINT published_posts_social_account_id_fkey FOREIGN KEY (social_account_id) REFERENCES public.social_accounts(id),
-  CONSTRAINT published_posts_content_output_id_fkey FOREIGN KEY (content_output_id) REFERENCES public.content_outputs(id)
+  CONSTRAINT published_posts_content_output_id_fkey FOREIGN KEY (content_output_id) REFERENCES public.content_outputs(id),
+  CONSTRAINT published_posts_parent_published_post_id_fkey FOREIGN KEY (parent_published_post_id) REFERENCES public.published_posts(id)
 );
 CREATE TABLE public.generation_logs (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
   persona_config_id uuid,
   topic_id uuid,
+  prompt_tokens integer,
+  completion_tokens integer,
+  total_tokens integer,
   input_payload jsonb,
   output_payload jsonb,
   status text DEFAULT 'success'::text,
@@ -133,6 +138,8 @@ CREATE TABLE public.subscription_plans (
   name text NOT NULL,
   max_personas integer NOT NULL DEFAULT 1,
   monthly_ai_credits integer NOT NULL DEFAULT 100,
+  daily_topic_generations integer NOT NULL DEFAULT 0,
+  daily_content_generations integer NOT NULL DEFAULT 0,
   is_active boolean NOT NULL DEFAULT true,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT subscription_plans_pkey PRIMARY KEY (id)
@@ -141,11 +148,11 @@ CREATE TABLE public.user_subscriptions (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
   plan_id uuid NOT NULL,
-  status text NOT NULL DEFAULT 'active'::text,
   started_at timestamp with time zone NOT NULL DEFAULT now(),
   ends_at timestamp with time zone,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  status text NOT NULL DEFAULT 'active'::text CHECK (status = ANY (ARRAY['active'::text, 'inactive'::text, 'paused'::text, 'cancelled'::text, 'expired'::text])),
   CONSTRAINT user_subscriptions_pkey PRIMARY KEY (id),
   CONSTRAINT user_subscriptions_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.subscription_plans(id),
   CONSTRAINT user_subscriptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
@@ -159,6 +166,19 @@ CREATE TABLE public.user_usage (
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT user_usage_pkey PRIMARY KEY (id),
   CONSTRAINT user_usage_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.user_daily_usage (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  usage_date date NOT NULL,
+  usage_key text NOT NULL,
+  request_count integer NOT NULL DEFAULT 0,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT user_daily_usage_pkey PRIMARY KEY (id),
+  CONSTRAINT user_daily_usage_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
+  CONSTRAINT user_daily_usage_usage_key_check CHECK (usage_key = ANY (ARRAY['generate_topic'::text, 'generate_content'::text])),
+  CONSTRAINT user_daily_usage_unique UNIQUE (user_id, usage_date, usage_key)
 );
 CREATE TABLE public.topics2 (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
