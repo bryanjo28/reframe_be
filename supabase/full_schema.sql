@@ -143,6 +143,7 @@ CREATE TABLE public.subscription_plans (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   daily_topic_generations integer NOT NULL DEFAULT 0,
   daily_content_generations integer NOT NULL DEFAULT 0,
+  price numeric NOT NULL DEFAULT 0,
   CONSTRAINT subscription_plans_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.user_subscriptions (
