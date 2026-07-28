@@ -23,6 +23,7 @@ function mapSubscriptionPlanRow(row) {
     id: row.id,
     code: row.code,
     name: row.name,
+    price: row.price,
     maxPersonas: row.max_personas,
     monthlyAiCredits: row.monthly_ai_credits,
     dailyTopicGenerations: row.daily_topic_generations,
@@ -44,9 +45,9 @@ async function listSubscriptionPlans({ supabase } = {}) {
 
   const { data, error } = await client
     .from("subscription_plans")
-    .select("id, code, name, max_personas, monthly_ai_credits, daily_topic_generations, daily_content_generations, is_active, created_at")
+    .select("id, code, name, price, max_personas, monthly_ai_credits, daily_topic_generations, daily_content_generations, is_active, created_at")
     .eq("is_active", true)
-    .order("monthly_ai_credits", { ascending: true });
+    .order("price", { ascending: true });
 
   if (error) {
     throw createHttpError(error.message, 500, error);

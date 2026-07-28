@@ -1,4 +1,5 @@
-﻿const { isSupabaseConfigured } = require("../config/supabase");
+const { isSupabaseConfigured } = require("../config/supabase");
+const { getActiveUserSubscription } = require("./subscriptionUsageService");
 
 function createHttpError(message, status = 500, details) {
   const error = new Error(message);
@@ -130,6 +131,51 @@ function buildUpdatePayload(input) {
   return payload;
 }
 
+async function ensurePersonaConfigWithinPlanLimit({ supabase, userId }) {
+  const activeSubscription = await getActiveUserSubscription({ supabase, userId });
+
+  if (!activeSubscription) {
+    throw createHttpError("No active subscription found for this user", 403);
+  }
+
+  const maxPersonas = Number(activeSubscription.plan.maxPersonas);
+
+  if (!Number.isFinite(maxPersonas) || maxPersonas < 0) {
+    throw createHttpError("Invalid persona limit on subscription plan", 500);
+  }
+
+  const { count, error } = await supabase
+    .from("persona_configs")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId);
+
+  if (error) {
+    throw createHttpError(error.message, 500, error);
+  }
+
+  const currentPersonaCount = count || 0;
+
+  if (currentPersonaCount >= maxPersonas) {
+    throw createHttpError(
+      "Kamu sudah mencapai batas persona untuk plan kamu. Upgrade plan untuk menambah persona.",
+      402,
+      {
+        code: "PERSONA_LIMIT_EXCEEDED",
+        maxPersonas,
+        currentPersonaCount,
+        remainingPersonas: 0,
+      }
+    );
+  }
+
+  return {
+    activeSubscription,
+    maxPersonas,
+    currentPersonaCount,
+    remainingPersonas: maxPersonas - currentPersonaCount,
+  };
+}
+
 async function listPersonaConfigs({ supabase, userId }) {
   if (!isSupabaseConfigured || !supabase) {
     throw createHttpError(
@@ -186,6 +232,7 @@ async function createPersonaConfig({ supabase, userId, payload }) {
   }
 
   const input = normalizePersonaConfigPayload(payload);
+  await ensurePersonaConfigWithinPlanLimit({ supabase, userId });
 
   const insertPayload = buildInsertPayload({ userId, input });
 
@@ -271,5 +318,3 @@ module.exports = {
   normalizePersonaConfigPayload,
   updatePersonaConfig,
 };
-
-

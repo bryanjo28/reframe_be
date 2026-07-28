@@ -105,15 +105,16 @@ CREATE TABLE public.generation_logs (
   user_id uuid NOT NULL,
   persona_config_id uuid,
   topic_id uuid,
-  prompt_tokens integer,
-  completion_tokens integer,
-  total_tokens integer,
   input_payload jsonb,
   output_payload jsonb,
   status text DEFAULT 'success'::text,
   error_message text,
   created_at timestamp with time zone DEFAULT now(),
   scheduled_job_run_id uuid,
+  prompt_tokens integer,
+  completion_tokens integer,
+  total_tokens integer,
+  provider text,
   CONSTRAINT generation_logs_pkey PRIMARY KEY (id),
   CONSTRAINT generation_logs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
   CONSTRAINT generation_logs_persona_config_id_fkey FOREIGN KEY (persona_config_id) REFERENCES public.persona_configs(id),
@@ -138,10 +139,10 @@ CREATE TABLE public.subscription_plans (
   name text NOT NULL,
   max_personas integer NOT NULL DEFAULT 1,
   monthly_ai_credits integer NOT NULL DEFAULT 100,
-  daily_topic_generations integer NOT NULL DEFAULT 0,
-  daily_content_generations integer NOT NULL DEFAULT 0,
   is_active boolean NOT NULL DEFAULT true,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
+  daily_topic_generations integer NOT NULL DEFAULT 0,
+  daily_content_generations integer NOT NULL DEFAULT 0,
   CONSTRAINT subscription_plans_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.user_subscriptions (
@@ -166,19 +167,6 @@ CREATE TABLE public.user_usage (
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT user_usage_pkey PRIMARY KEY (id),
   CONSTRAINT user_usage_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
-);
-CREATE TABLE public.user_daily_usage (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL,
-  usage_date date NOT NULL,
-  usage_key text NOT NULL,
-  request_count integer NOT NULL DEFAULT 0,
-  created_at timestamp with time zone NOT NULL DEFAULT now(),
-  updated_at timestamp with time zone NOT NULL DEFAULT now(),
-  CONSTRAINT user_daily_usage_pkey PRIMARY KEY (id),
-  CONSTRAINT user_daily_usage_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
-  CONSTRAINT user_daily_usage_usage_key_check CHECK (usage_key = ANY (ARRAY['generate_topic'::text, 'generate_content'::text])),
-  CONSTRAINT user_daily_usage_unique UNIQUE (user_id, usage_date, usage_key)
 );
 CREATE TABLE public.topics2 (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -289,4 +277,15 @@ CREATE TABLE public.scheduled_job_runs (
   CONSTRAINT scheduled_job_runs_pkey PRIMARY KEY (id),
   CONSTRAINT scheduled_job_runs_scheduled_job_id_fkey FOREIGN KEY (scheduled_job_id) REFERENCES public.scheduled_jobs(id),
   CONSTRAINT scheduled_job_runs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.user_daily_usage (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  usage_date date NOT NULL,
+  usage_key text NOT NULL CHECK (usage_key = ANY (ARRAY['generate_topic'::text, 'generate_content'::text])),
+  request_count integer NOT NULL DEFAULT 0,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT user_daily_usage_pkey PRIMARY KEY (id),
+  CONSTRAINT user_daily_usage_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
 );
