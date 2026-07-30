@@ -19,7 +19,17 @@ async function getConnectUrl(req, res, next) {
 
 async function handleThreadsCallback(req, res, next) {
   const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-  const callbackPath = "/threads/callback";
+  const callbackPath = process.env.THREADS_FRONTEND_CALLBACK_PATH || "/";
+
+  function buildFrontendRedirect(params) {
+    const url = new URL(frontendUrl);
+    const normalizedPath = callbackPath.startsWith("/") ? callbackPath : `/${callbackPath}`;
+
+    url.pathname = normalizedPath;
+    url.search = params.toString();
+
+    return url.toString();
+  }
 
   try {
     const { code, state } = req.query;
@@ -32,14 +42,14 @@ async function handleThreadsCallback(req, res, next) {
       threads_id: result.threadsUserId || "",
     });
 
-    return res.redirect(`${frontendUrl}${callbackPath}?${params.toString()}`);
+    return res.redirect(buildFrontendRedirect(params));
   } catch (error) {
     const params = new URLSearchParams({
       connected: "false",
       error: error.message || "OAuth failed",
     });
 
-    return res.redirect(`${frontendUrl}${callbackPath}?${params.toString()}`);
+    return res.redirect(buildFrontendRedirect(params));
   }
 }
 
