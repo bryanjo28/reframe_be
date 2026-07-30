@@ -136,6 +136,34 @@ async function main() {
     }
   });
 
+  await run("handleCallback accepts signed state after service reload", async () => {
+    const restoreFetch = mockFetch();
+    const originalServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "";
+
+    const initialThreadsAuthService = loadFreshThreadsAuthService();
+
+    try {
+      const userId = crypto.randomUUID();
+      const connect = initialThreadsAuthService.createAuthorizationRequest({ userId });
+      const reloadedThreadsAuthService = loadFreshThreadsAuthService();
+
+      const result = await reloadedThreadsAuthService.handleCallback({
+        code: "test_code_456",
+        state: connect.state,
+      });
+
+      assert.equal(result.userId, userId);
+      assert.equal(result.provider, "threads");
+      assert.equal(result.accessTokenStored, true);
+      assert.equal(result.storage, "memory");
+    } finally {
+      process.env.SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey;
+      loadFreshThreadsAuthService();
+      restoreFetch();
+    }
+  });
+
   await run("refreshLongLivedToken normalizes refresh response", async () => {
     const restoreFetch = mockFetch();
 

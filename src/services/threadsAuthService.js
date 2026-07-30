@@ -8,6 +8,7 @@ const oauthStateStore = require("../store/oauthStateStore");
 
 const THREADS_API_BASE = "https://graph.threads.net";
 const THREADS_API_VERSION = "v1.0";
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 function createHttpError(message, status = 500, details) {
   const error = new Error(message);
@@ -101,6 +102,82 @@ function getDisplayUsername(threadsUser) {
   }
 
   return threadsUser.username || threadsUser.name || null;
+}
+
+function getOAuthStateSecret() {
+  return (
+    process.env.THREADS_OAUTH_STATE_SECRET ||
+    threadsConfig.appSecret ||
+    process.env.APP_BASE_URL ||
+    "threads-oauth-state-fallback"
+  );
+}
+
+function encodeStatePayload(payload) {
+  return Buffer.from(JSON.stringify(payload)).toString("base64url");
+}
+
+function signStatePayload(encodedPayload) {
+  return crypto.createHmac("sha256", getOAuthStateSecret()).update(encodedPayload).digest("base64url");
+}
+
+function createSignedState({ userId }) {
+  const payload = {
+    provider: "threads",
+    userId,
+    nonce: crypto.randomUUID(),
+    createdAt: Date.now(),
+  };
+
+  const encodedPayload = encodeStatePayload(payload);
+  const signature = signStatePayload(encodedPayload);
+
+  return `${encodedPayload}.${signature}`;
+}
+
+function parseSignedState(state) {
+  if (!state || typeof state !== "string") {
+    return null;
+  }
+
+  const [encodedPayload, signature] = state.split(".");
+
+  if (!encodedPayload || !signature) {
+    return null;
+  }
+
+  const expectedSignature = signStatePayload(encodedPayload);
+  const providedSignature = Buffer.from(signature);
+  const expectedSignatureBuffer = Buffer.from(expectedSignature);
+
+  if (
+    providedSignature.length !== expectedSignatureBuffer.length ||
+    !crypto.timingSafeEqual(providedSignature, expectedSignatureBuffer)
+  ) {
+    return null;
+  }
+
+  let payload = null;
+
+  try {
+    payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
+  } catch (error) {
+    return null;
+  }
+
+  if (!payload || payload.provider !== "threads" || !payload.userId || !payload.createdAt) {
+    return null;
+  }
+
+  if (Date.now() - Number(payload.createdAt) > OAUTH_STATE_TTL_MS) {
+    return null;
+  }
+
+  return {
+    userId: payload.userId,
+    provider: payload.provider,
+    createdAt: new Date(payload.createdAt).toISOString(),
+  };
 }
 
 function buildAuthorizationUrl({ state }) {
@@ -230,7 +307,7 @@ function createAuthorizationRequest({ userId }) {
     );
   }
 
-  const state = crypto.randomUUID();
+  const state = createSignedState({ userId });
 
   oauthStateStore.save(state, {
     userId,
@@ -257,8 +334,12 @@ async function handleCallback({ code, state }) {
   }
 
   const oauthSession = oauthStateStore.consume(state);
+  const verifiedSession =
+    oauthSession && oauthSession.provider === "threads"
+      ? oauthSession
+      : parseSignedState(state);
 
-  if (!oauthSession || oauthSession.provider !== "threads") {
+  if (!verifiedSession || verifiedSession.provider !== "threads") {
     throw createHttpError("Invalid or expired OAuth state", 400);
   }
 
@@ -273,7 +354,7 @@ async function handleCallback({ code, state }) {
 
   const threadsUser = await getThreadsUser(activeAccessToken);
   const persisted = await saveThreadsAccount({
-    userId: oauthSession.userId,
+    userId: verifiedSession.userId,
     accessToken: activeAccessToken,
     refreshToken: activeRefreshToken,
     expiresIn: activeExpiresIn,
@@ -281,7 +362,7 @@ async function handleCallback({ code, state }) {
   });
 
   return {
-    userId: oauthSession.userId,
+    userId: verifiedSession.userId,
     provider: "threads",
     threadsUserId: threadsUser.id,
     threadsUsername: getDisplayUsername(threadsUser),
