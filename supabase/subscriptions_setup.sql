@@ -1,5 +1,6 @@
 alter table public.subscription_plans enable row level security;
 alter table public.user_subscriptions enable row level security;
+alter table public.user_usage enable row level security;
 
 alter table public.subscription_plans
 add column if not exists daily_topic_generations integer not null default 0;
@@ -169,6 +170,67 @@ using (
   )
 );
 
+drop policy if exists "Users can view own monthly usage or admins can view all" on public.user_usage;
+create policy "Users can view own monthly usage or admins can view all"
+on public.user_usage
+for select
+using (
+  auth.uid() = user_id
+  or exists (
+    select 1
+    from public.profiles p
+    where p.id = auth.uid()
+      and p.role = 'admin'
+  )
+);
+
+drop policy if exists "Admins can insert monthly usage" on public.user_usage;
+create policy "Admins can insert monthly usage"
+on public.user_usage
+for insert
+with check (
+  exists (
+    select 1
+    from public.profiles p
+    where p.id = auth.uid()
+      and p.role = 'admin'
+  )
+);
+
+drop policy if exists "Admins can update monthly usage" on public.user_usage;
+create policy "Admins can update monthly usage"
+on public.user_usage
+for update
+using (
+  exists (
+    select 1
+    from public.profiles p
+    where p.id = auth.uid()
+      and p.role = 'admin'
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.profiles p
+    where p.id = auth.uid()
+      and p.role = 'admin'
+  )
+);
+
+drop policy if exists "Admins can delete monthly usage" on public.user_usage;
+create policy "Admins can delete monthly usage"
+on public.user_usage
+for delete
+using (
+  exists (
+    select 1
+    from public.profiles p
+    where p.id = auth.uid()
+      and p.role = 'admin'
+  )
+);
+
 drop policy if exists "Users can view own daily usage or admins can view all" on public.user_daily_usage;
 create policy "Users can view own daily usage or admins can view all"
 on public.user_daily_usage
@@ -183,13 +245,12 @@ using (
   )
 );
 
-drop policy if exists "Users can insert own daily usage or admins can insert any" on public.user_daily_usage;
-create policy "Users can insert own daily usage or admins can insert any"
+drop policy if exists "Admins can insert daily usage" on public.user_daily_usage;
+create policy "Admins can insert daily usage"
 on public.user_daily_usage
 for insert
 with check (
-  auth.uid() = user_id
-  or exists (
+  exists (
     select 1
     from public.profiles p
     where p.id = auth.uid()
@@ -197,13 +258,12 @@ with check (
   )
 );
 
-drop policy if exists "Users can update own daily usage or admins can update all" on public.user_daily_usage;
-create policy "Users can update own daily usage or admins can update all"
+drop policy if exists "Admins can update daily usage" on public.user_daily_usage;
+create policy "Admins can update daily usage"
 on public.user_daily_usage
 for update
 using (
-  auth.uid() = user_id
-  or exists (
+  exists (
     select 1
     from public.profiles p
     where p.id = auth.uid()
@@ -211,8 +271,7 @@ using (
   )
 )
 with check (
-  auth.uid() = user_id
-  or exists (
+  exists (
     select 1
     from public.profiles p
     where p.id = auth.uid()

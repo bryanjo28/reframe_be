@@ -1,0 +1,17 @@
+Menurut docs resmi Supabase:
+Supabase punya fitur Confirm Email
+kalau Confirm Email aktif, user harus verifikasi email dulu sebelum login pertama
+saat signUp, biasanya user ada tapi session akan null sampai email dikonfirmasi
+setelah user klik link verifikasi, dia diarahkan ke SITE_URL atau redirect URL yang kamu set
+Sumber:
+https://supabase.com/docs/guides/auth/general-configuration
+https://supabase.com/docs/reference/javascript/auth-signup
+https://supabase.com/docs/guides/auth/auth-email-templates
+Catatan penting:
+Supabase juga menyarankan pakai SMTP sendiri untuk production, karena email bawaan rate limit-nya rendah dan lebih cocok untuk demo/testing:
+https://supabase.com/docs/guides/troubleshooting/not-receiving-auth-emails-from-the-supabase-project-OFSNzw
+Jadi kalau kamu mau buka register lagi nanti, setup minimumnya biasanya:
+aktifkan Confirm Email di Supabase Auth
+set SITE_URL dan redirect URLs dengan benar
+kalau production, pertimbangkan SMTP sendiri
+Kalau mau, saya bisa bantu kasih langkah dashboard Supabase yang perlu kamu klik satu per satu.

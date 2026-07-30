@@ -43,6 +43,18 @@ async function handleThreadsCallback(req, res, next) {
   }
 }
 
+async function handleThreadsDeleteCallback(req, res, next) {
+  try {
+    return res.status(200).json({
+      success: true,
+      message: "Threads delete callback received",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function autoPostThreadsDrafts(req, res, next) {
   try {
     const data = await threadsPublishService.autoPostThreadsDrafts({
@@ -87,5 +99,6 @@ module.exports = {
   autoPostThreadsDrafts,
   getConnectUrl,
   handleThreadsCallback,
+  handleThreadsDeleteCallback,
   runScheduledThreadsJob,
 };

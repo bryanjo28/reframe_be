@@ -116,8 +116,21 @@ async function logout(req, res, next) {
   }
 }
 
+async function handleMetaUninstall(req, res, next) {
+  try {
+    return res.status(200).json({
+      success: true,
+      message: "Meta uninstall callback received",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   changePassword,
+  handleMetaUninstall,
   login,
   me,
   meThreads,
