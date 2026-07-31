@@ -12,5 +12,6 @@ router.use(authMiddleware);
 
 router.get("/", threadsAccountsController.getThreadsAccount);
 router.post("/", validateThreadsAccountRequest, threadsAccountsController.saveThreadsAccount);
+router.delete("/", threadsAccountsController.disconnectThreadsAccount);
 
 module.exports = router;

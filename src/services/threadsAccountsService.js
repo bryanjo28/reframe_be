@@ -191,7 +191,35 @@ async function getThreadsAccount({ supabase, userId }) {
   return mapThreadsAccountRow(data);
 }
 
+async function disconnectThreadsAccount({ supabase, userId }) {
+  if (!isSupabaseConfigured || !supabase) {
+    throw createHttpError(
+      "Supabase is not configured. Fill SUPABASE_URL and SUPABASE_ANON_KEY first.",
+      500
+    );
+  }
+
+  const { data, error } = await supabase
+    .from("social_accounts")
+    .delete()
+    .eq("user_id", userId)
+    .eq("platform", "threads")
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw createHttpError(error.message, 400, error);
+  }
+
+  if (!data) {
+    throw createHttpError("Threads account not found", 404);
+  }
+
+  return mapThreadsAccountRow(data);
+}
+
 module.exports = {
+  disconnectThreadsAccount,
   getThreadsAccount,
   normalizeThreadsAccountPayload,
   saveThreadsAccount,

@@ -35,7 +35,25 @@ async function saveThreadsAccount(req, res, next) {
   }
 }
 
+async function disconnectThreadsAccount(req, res, next) {
+  try {
+    const data = await threadsAccountsService.disconnectThreadsAccount({
+      supabase: req.supabase,
+      userId: req.user.id,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Threads account disconnected successfully",
+      data,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
+  disconnectThreadsAccount,
   getThreadsAccount,
   saveThreadsAccount,
 };
