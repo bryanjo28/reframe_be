@@ -1,6 +1,7 @@
 const cron = require("node-cron");
 const { supabaseAdmin, isSupabaseAdminConfigured } = require("../config/supabase");
 const { runScheduledThreadsJob } = require("./threadsPublishService");
+const { autoGenerateContentOutputs } = require("./contentOutputsService");
 
 async function runDueScheduledJobs() {
   if (!isSupabaseAdminConfigured || !supabaseAdmin) {
@@ -12,9 +13,8 @@ async function runDueScheduledJobs() {
 
   const { data: dueJobs, error } = await supabaseAdmin
     .from("scheduled_jobs")
-    .select("id, user_id")
+    .select("id, user_id, job_type, config, target_count, schedule_value")
     .eq("status", "active")
-    .eq("job_type", "threads_auto_post")
     .lte("next_run_at", nowIso);
 
   if (error) {
@@ -28,26 +28,40 @@ async function runDueScheduledJobs() {
 
   console.log(`[cron] Found ${dueJobs.length} due job(s)`);
 
-  // group by user_id
-  const byUser = {};
   for (const job of dueJobs) {
-    if (!byUser[job.user_id]) byUser[job.user_id] = [];
-    byUser[job.user_id].push(job.id);
-  }
-
-  for (const [userId, jobIds] of Object.entries(byUser)) {
-    for (const scheduledJobId of jobIds) {
-      try {
+    try {
+      if (job.job_type === "threads_auto_post") {
         await runScheduledThreadsJob({
           supabase: supabaseAdmin,
-          userId,
-          scheduledJobId,
+          userId: job.user_id,
+          scheduledJobId: job.id,
           force: true,
         });
-        console.log(`[cron] Job ${scheduledJobId} for user ${userId} completed`);
-      } catch (err) {
-        console.error(`[cron] Job ${scheduledJobId} for user ${userId} failed:`, err.message);
+        console.log(`[cron] Job ${job.id} for user ${job.user_id} completed`);
+        continue;
       }
+
+      if (job.job_type === "content_auto_generate") {
+        const config = job.config && typeof job.config === "object" ? job.config : {};
+        await autoGenerateContentOutputs({
+          supabase: supabaseAdmin,
+          userId: job.user_id,
+          payload: {
+            personaConfigId: config.personaConfigId,
+            contentPillarId: config.contentPillarId,
+            topicIds: config.topicIds,
+            targetCount: job.target_count,
+            scheduledAt: job.schedule_value,
+            scheduledJobId: job.id,
+          },
+        });
+        console.log(`[cron] Job ${job.id} for user ${job.user_id} completed`);
+        continue;
+      }
+
+      console.warn(`[cron] Unsupported job type ${job.job_type} for job ${job.id}`);
+    } catch (err) {
+      console.error(`[cron] Job ${job.id} for user ${job.user_id} failed:`, err.message);
     }
   }
 }

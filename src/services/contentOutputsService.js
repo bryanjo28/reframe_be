@@ -1,5 +1,6 @@
 const { isSupabaseConfigured } = require("../config/supabase");
 const promptTemplatesService = require("./promptTemplatesService");
+const scheduledJobsService = require("./scheduledJobsService");
 const sumopodService = require("./sumopodService");
 const { createGenerationLog } = require("./generationLogsService");
 const { consumeDailyGenerationHit } = require("./dailyGenerationUsageService");
@@ -88,6 +89,27 @@ function readOptionalBoolean(source, keys) {
   return Boolean(value);
 }
 
+function readOptionalTextArray(source, keys) {
+  if (!hasKey(source, keys)) {
+    return undefined;
+  }
+
+  const matchedKey = keys.find((key) => Object.prototype.hasOwnProperty.call(source, key));
+  const value = source[matchedKey];
+
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  return value
+    .map((item) => String(item || "").trim())
+    .filter((item) => item.length > 0);
+}
+
 function normalizeContentOutputPayload(payload = {}) {
   const source = getSource(payload);
 
@@ -124,6 +146,7 @@ function normalizeAutoGenerateContentOutputsPayload(payload = {}) {
   return {
     ...normalizeContentOutputPayload(source),
     targetCount: readOptionalNumber(source, ["targetCount", "target_count"]),
+    topicIds: readOptionalTextArray(source, ["topicIds", "topic_ids"]),
   };
 }
 
@@ -668,6 +691,27 @@ async function markTopicAsUsed({ supabase, userId, topicId }) {
   return data || null;
 }
 
+async function markTopicsAsUsed({ supabase, userId, topicIds = [] }) {
+  if (!Array.isArray(topicIds) || topicIds.length === 0) {
+    return [];
+  }
+
+  const usedAt = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("content_topics")
+    .update({ used_at: usedAt })
+    .in("id", topicIds)
+    .eq("user_id", userId)
+    .is("used_at", null)
+    .select("id, used_at");
+
+  if (error) {
+    throw createHttpError(error.message, 400, error);
+  }
+
+  return data || [];
+}
+
 async function listUnusedTopicsForAutoGeneration({ supabase, userId, contentPillarId, targetCount }) {
   const { data, error } = await supabase
     .from("content_topics")
@@ -695,6 +739,42 @@ async function listUnusedTopicsForAutoGeneration({ supabase, userId, contentPill
     used_at: row.used_at,
     created_at: row.created_at,
   }));
+}
+
+async function listTopicsByIdsForAutoGeneration({ supabase, userId, contentPillarId, topicIds }) {
+  if (!Array.isArray(topicIds) || topicIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from("content_topics")
+    .select(
+      "id, user_id, persona_config_id, content_pillar_id, category, subcategory, topic, used_at, created_at"
+    )
+    .eq("user_id", userId)
+    .eq("content_pillar_id", contentPillarId)
+    .in("id", topicIds)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw createHttpError(error.message, 400, error);
+  }
+
+  const byId = new Map((data || []).map((row) => [row.id, row]));
+  return topicIds
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .map((row) => ({
+      id: row.id,
+      user_id: row.user_id,
+      persona_config_id: row.persona_config_id,
+      content_pillar_id: row.content_pillar_id,
+      category: row.category,
+      subcategory: row.subcategory,
+      topic: row.topic,
+      used_at: row.used_at,
+      created_at: row.created_at,
+    }));
 }
 
 function mapScheduledJobRunRow(row) {
@@ -1239,12 +1319,19 @@ async function autoGenerateContentOutputs({ supabase, userId, payload }) {
   const requestedCount = input.targetCount;
   const scheduledAt = input.scheduledAt || new Date().toISOString();
 
-  const topics = await listUnusedTopicsForAutoGeneration({
-    supabase,
-    userId,
-    contentPillarId: contentPillar.id,
-    targetCount: requestedCount,
-  });
+  const topics = Array.isArray(input.topicIds) && input.topicIds.length > 0
+    ? await listTopicsByIdsForAutoGeneration({
+        supabase,
+        userId,
+        contentPillarId: contentPillar.id,
+        topicIds: input.topicIds,
+      })
+    : await listUnusedTopicsForAutoGeneration({
+        supabase,
+        userId,
+        contentPillarId: contentPillar.id,
+        targetCount: requestedCount,
+      });
 
   if (topics.length < requestedCount) {
     throw createHttpError(
@@ -1321,6 +1408,7 @@ async function autoGenerateContentOutputs({ supabase, userId, payload }) {
     failedCount,
     scheduledAt,
   };
+  const responseResults = results.map(mapAutoGenerateResultForResponse);
 
   if (scheduledJobRun) {
     const updatedRun = await updateScheduledJobRun({
@@ -1336,7 +1424,7 @@ async function autoGenerateContentOutputs({ supabase, userId, payload }) {
         failedCount,
         resultPayload: {
           summary,
-          results,
+          results: responseResults,
         },
         finishedAt,
       },
@@ -1346,10 +1434,12 @@ async function autoGenerateContentOutputs({ supabase, userId, payload }) {
       .from("scheduled_jobs")
       .update({
         last_run_at: finishedAt,
+        next_run_at: null,
         last_run_status: failedCount > 0 ? "completed_with_errors" : "completed",
         last_run_generated_count: successCount,
         last_run_error: failedCount > 0 ? "One or more topics failed during auto generation" : null,
         error_message: failedCount > 0 ? "One or more topics failed during auto generation" : null,
+        status: "completed",
       })
       .eq("id", input.scheduledJobId)
       .eq("user_id", userId);
@@ -1357,7 +1447,7 @@ async function autoGenerateContentOutputs({ supabase, userId, payload }) {
     return {
       success: true,
       summary,
-      results,
+      results: responseResults,
       scheduledJobRun: updatedRun || scheduledJobRun,
       scheduledJobId: input.scheduledJobId,
     };
@@ -1366,9 +1456,128 @@ async function autoGenerateContentOutputs({ supabase, userId, payload }) {
   return {
     success: true,
     summary,
-    results,
+    results: responseResults,
     scheduledJobRun: null,
     scheduledJobId: null,
+  };
+}
+
+function mapAutoGenerateResultForResponse(result) {
+  if (!result || result.status !== "success" || !result.contentOutput) {
+    return result;
+  }
+
+  return {
+    topicId: result.topicId,
+    status: result.status,
+    contentOutput: {
+      id: result.contentOutput.id,
+      topicId: result.contentOutput.topicId,
+      contentPillarId: result.contentOutput.contentPillarId,
+      personaConfigId: result.contentOutput.personaConfigId,
+      platform: result.contentOutput.platform,
+      formatOutput: result.contentOutput.formatOutput,
+      status: result.contentOutput.status,
+      scheduledAt: result.contentOutput.scheduledAt,
+      content: result.contentOutput.content,
+      createdAt: result.contentOutput.createdAt,
+      updatedAt: result.contentOutput.updatedAt,
+    },
+  };
+}
+
+async function scheduleAutoGenerateContentOutputs({ supabase, userId, payload }) {
+  if (!isSupabaseConfigured || !supabase) {
+    throw createHttpError(
+      "Supabase is not configured. Fill SUPABASE_URL and SUPABASE_ANON_KEY first.",
+      500
+    );
+  }
+
+  const input = normalizeAutoGenerateContentOutputsPayload(payload);
+  assertAutoGenerateContentOutputsPayload(input);
+
+  if (!input.scheduledAt) {
+    throw createHttpError("Missing required field: scheduledAt", 400);
+  }
+
+  if (Number.isNaN(Date.parse(input.scheduledAt))) {
+    throw createHttpError("scheduledAt must be a valid date-time string", 400);
+  }
+
+  const contentPillar = await assertContentPillarBelongsToUserAndPersona({
+    supabase,
+    userId,
+    contentPillarId: input.contentPillarId,
+    personaConfigId: input.personaConfigId || null,
+  });
+
+  const personaConfigId = contentPillar.personaConfigId;
+  const topics = await listUnusedTopicsForAutoGeneration({
+    supabase,
+    userId,
+    contentPillarId: contentPillar.id,
+    targetCount: input.targetCount,
+  });
+
+  if (topics.length < input.targetCount) {
+    throw createHttpError(
+      `Not enough unused topics for this content pillar. Requested ${input.targetCount}, available ${topics.length}.`,
+      400,
+      {
+        requestedCount: input.targetCount,
+        availableCount: topics.length,
+        contentPillarId: contentPillar.id,
+      }
+    );
+  }
+
+  const topicIds = topics.map((topic) => topic.id);
+  const lockedTopics = await markTopicsAsUsed({
+    supabase,
+    userId,
+    topicIds,
+  });
+
+  if (lockedTopics.length !== topicIds.length) {
+    throw createHttpError(
+      "Failed to reserve one or more topics for scheduled generation",
+      409,
+      {
+        requestedCount: topicIds.length,
+        lockedCount: lockedTopics.length,
+        contentPillarId: contentPillar.id,
+      }
+    );
+  }
+
+  const scheduledJob = await scheduledJobsService.createScheduledJob({
+    supabase,
+    userId,
+    payload: {
+      personaConfigId,
+      jobType: "content_auto_generate",
+      config: {
+        contentPillarId: contentPillar.id,
+        personaConfigId,
+        topicIds,
+      },
+      targetCount: input.targetCount,
+      scheduleType: "once",
+      scheduleValue: input.scheduledAt,
+      nextRunAt: input.scheduledAt,
+      status: "active",
+    },
+  });
+
+  return {
+    scheduledJob,
+    summary: {
+      contentPillarId: contentPillar.id,
+      personaConfigId,
+      targetCount: input.targetCount,
+      scheduledAt: input.scheduledAt,
+    },
   };
 }
 
@@ -1504,6 +1713,29 @@ async function deleteContentOutput({ supabase, userId, id }) {
     );
   }
 
+  const { data: existingContentOutput, error: existingError } = await supabase
+    .from("content_outputs")
+    .select("id, status, external_post_id")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (existingError) {
+    throw createHttpError(existingError.message, 400, existingError);
+  }
+
+  if (!existingContentOutput) {
+    throw createHttpError("Content output not found", 404);
+  }
+
+  if (
+    existingContentOutput.status === "posted" ||
+    (existingContentOutput.external_post_id &&
+      String(existingContentOutput.external_post_id).trim().length > 0)
+  ) {
+    throw createHttpError("Posted content cannot be deleted", 409);
+  }
+
   const { data, error } = await supabase
     .from("content_outputs")
     .delete()
@@ -1516,10 +1748,6 @@ async function deleteContentOutput({ supabase, userId, id }) {
     throw createHttpError(error.message, 400, error);
   }
 
-  if (!data) {
-    throw createHttpError("Content output not found", 404);
-  }
-
   return mapContentOutputRow(data);
 }
 
@@ -1528,6 +1756,7 @@ module.exports = {
   createScheduledJobRun,
   deleteContentOutput,
   autoGenerateContentOutputs,
+  scheduleAutoGenerateContentOutputs,
   generateContentOutputDemo,
   generateContentOutput,
   getContentOutputById,

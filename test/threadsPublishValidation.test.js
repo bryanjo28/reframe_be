@@ -26,16 +26,13 @@ run("normalizeAutoPostThreadsPayload maps camelCase and snake_case", () => {
   assert.equal(payload.limit, 5);
 });
 
-run("validateAutoPostThreadsRequest accepts empty body", () => {
+run("validateAutoPostThreadsRequest rejects missing scheduledAt", () => {
   const req = { body: {} };
-  let nextCalled = false;
-  validateAutoPostThreadsRequest(req, {}, () => {
-    nextCalled = true;
+  let errorMessage = "";
+
+  validateAutoPostThreadsRequest(req, {}, (error) => {
+    errorMessage = error.message;
   });
 
-  assert.equal(nextCalled, true);
-  assert.deepEqual(req.threadsAutoPostInput, {
-    contentOutputId: undefined,
-    limit: undefined,
-  });
+  assert.equal(errorMessage, "Missing required field: scheduledAt");
 });

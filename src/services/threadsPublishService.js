@@ -354,16 +354,15 @@ async function scheduleApprovedContentOutputs({
   const scheduledJob = await scheduledJobsService.createScheduledJob({
     supabase,
     userId,
-    payload: {
-      personaConfigId,
-      jobType: "threads_auto_post",
-      config: {
+      payload: {
         personaConfigId,
-        limit: queryLimit,
-        scheduledAt,
-        contentOutputId,
-      },
-      targetCount: queryLimit,
+        jobType: "threads_auto_post",
+        config: {
+          personaConfigId,
+          scheduledAt,
+          contentOutputId,
+        },
+        targetCount: queryLimit,
       scheduleType: "once",
       scheduleValue: scheduledAt,
       nextRunAt: scheduledAt,
@@ -708,7 +707,7 @@ async function autoPostThreadsDrafts({ supabase, userId, payload = {} }) {
 
 async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit = 20, force = false }) {
   const nowIso = new Date().toISOString();
-  const queryLimit = Number.isInteger(limit) ? limit : 20;
+  const jobsFetchLimit = Number.isInteger(limit) ? limit : 20;
 
   let jobQuery = supabase
     .from("scheduled_jobs")
@@ -716,7 +715,7 @@ async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit 
     .eq("user_id", userId)
     .eq("status", "active")
     .order("next_run_at", { ascending: true })
-    .limit(queryLimit);
+    .limit(jobsFetchLimit);
 
   if (!force) {
     jobQuery = jobQuery.lte("next_run_at", nowIso);
@@ -760,7 +759,7 @@ async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit 
       userId,
       payload: {
         scheduledJobId: scheduledJob.id,
-        targetCount: scheduledJob.targetCount || queryLimit,
+        targetCount: scheduledJob.targetCount,
         runPayload: {
           scheduledJobId: scheduledJob.id,
           personaConfigId: scheduledJob.personaConfigId,
@@ -780,7 +779,7 @@ async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit 
       .is("scheduled_job_run_id", null)
       .order("scheduled_at", { ascending: true })
       .order("created_at", { ascending: true })
-      .limit(scheduledJob.targetCount || queryLimit);
+      .limit(scheduledJob.targetCount);
 
     if (!force) {
       dueQuery = dueQuery.lte("scheduled_at", nowIso);

@@ -1,9 +1,7 @@
 const assert = require("assert");
 
-const {
-  normalizeScheduledJobPayload,
-  validateCreateScheduledJobRequest,
-} = require("../src/middlewares/scheduledJobsValidationMiddleware");
+const { validateCreateScheduledJobRequest } = require("../src/middlewares/scheduledJobsValidationMiddleware");
+const { normalizeScheduledJobPayload } = require("../src/services/scheduledJobsService");
 
 function run(name, fn) {
   try {

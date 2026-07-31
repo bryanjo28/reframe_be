@@ -3,7 +3,7 @@
 const authMiddleware = require("../middlewares/authMiddleware");
 const contentOutputsController = require("../controllers/contentOutputsController");
 const {
-  validateAutoGenerateContentOutputsRequest,
+  validateScheduleAutoGenerateContentOutputsRequest,
   validateContentOutputIdParam,
   validateCreateContentOutputRequest,
   validateGenerateContentOutputDemoRequest,
@@ -32,9 +32,9 @@ router.post(
   contentOutputsController.generateContentOutput
 );
 router.post(
-  "/auto-generate",
-  validateAutoGenerateContentOutputsRequest,
-  contentOutputsController.autoGenerateContentOutputs
+  "/auto-generate/schedule",
+  validateScheduleAutoGenerateContentOutputsRequest,
+  contentOutputsController.scheduleAutoGenerateContentOutputs
 );
 router.post(
   "/generate-demo",

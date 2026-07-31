@@ -62,27 +62,23 @@ async function generateContentOutput(req, res, next) {
     });
 
     res.status(201).json({
-      success: true,
-      message: "Content output generated successfully",
-      data,
+      contents: data?.contentOutput?.content ? [data.contentOutput.content] : [],
     });
   } catch (error) {
     next(error);
   }
 }
 
-async function autoGenerateContentOutputs(req, res, next) {
+async function scheduleAutoGenerateContentOutputs(req, res, next) {
   try {
-    const data = await contentOutputsService.autoGenerateContentOutputs({
+    await contentOutputsService.scheduleAutoGenerateContentOutputs({
       supabase: req.supabase,
       userId: req.user.id,
       payload: req.contentOutputAutoGenerateInput || req.body,
     });
 
     res.status(201).json({
-      success: true,
-      message: "Content outputs auto-generated successfully",
-      data,
+      contents: [],
     });
   } catch (error) {
     next(error);
@@ -147,7 +143,7 @@ async function deleteContentOutput(req, res, next) {
 module.exports = {
   createContentOutput,
   deleteContentOutput,
-  autoGenerateContentOutputs,
+  scheduleAutoGenerateContentOutputs,
   generateContentOutputDemo,
   generateContentOutput,
   getContentOutputById,

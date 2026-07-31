@@ -1,4 +1,5 @@
 require("./authValidation.test");
+require("./contentOutputsValidation.test");
 require("./contentPillarsValidation.test");
 require("./contentTopicsGeneration.test");
 require("./personaConfigsValidation.test");

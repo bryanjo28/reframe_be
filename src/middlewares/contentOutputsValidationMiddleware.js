@@ -85,6 +85,47 @@ function validateAutoGenerateContentOutputsRequest(req, res, next) {
   }
 }
 
+function validateScheduleAutoGenerateContentOutputsRequest(req, res, next) {
+  try {
+    const contentOutputAutoGenerateInput = normalizeAutoGenerateContentOutputsPayload(req.body);
+
+    if (!contentOutputAutoGenerateInput.contentPillarId) {
+      throw createHttpError("Missing required field: contentPillarId", 400);
+    }
+
+    if (
+      contentOutputAutoGenerateInput.targetCount === undefined ||
+      contentOutputAutoGenerateInput.targetCount === null
+    ) {
+      throw createHttpError("Missing required field: targetCount", 400);
+    }
+
+    if (!Number.isInteger(contentOutputAutoGenerateInput.targetCount)) {
+      throw createHttpError("targetCount must be an integer", 400);
+    }
+
+    if (
+      contentOutputAutoGenerateInput.targetCount < 1 ||
+      contentOutputAutoGenerateInput.targetCount > 20
+    ) {
+      throw createHttpError("targetCount must be between 1 and 20", 400);
+    }
+
+    if (!contentOutputAutoGenerateInput.scheduledAt) {
+      throw createHttpError("Missing required field: scheduledAt", 400);
+    }
+
+    if (Number.isNaN(Date.parse(contentOutputAutoGenerateInput.scheduledAt))) {
+      throw createHttpError("scheduledAt must be a valid date-time string", 400);
+    }
+
+    req.contentOutputAutoGenerateInput = contentOutputAutoGenerateInput;
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
 function validateGenerateContentOutputDemoRequest(req, res, next) {
   try {
     const contentOutputDemoInput = normalizeGenerateContentOutputDemoPayload(req.body);
@@ -136,6 +177,7 @@ function validateContentOutputIdParam(req, res, next) {
 module.exports = {
   validateContentOutputIdParam,
   validateAutoGenerateContentOutputsRequest,
+  validateScheduleAutoGenerateContentOutputsRequest,
   validateCreateContentOutputRequest,
   validateGenerateContentOutputDemoRequest,
   validateGenerateContentOutputRequest,

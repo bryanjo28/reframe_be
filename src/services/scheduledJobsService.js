@@ -192,10 +192,6 @@ function buildInsertPayload({ userId, input }) {
     schedule_value: input.scheduleValue,
   };
 
-  if (input.promptTemplateId !== undefined) {
-    payload.prompt_template_id = input.promptTemplateId;
-  }
-
   if (input.jobType !== undefined) {
     payload.job_type = input.jobType;
   }
@@ -248,10 +244,6 @@ function buildUpdatePayload(input) {
 
   if (input.personaConfigId !== undefined) {
     payload.persona_config_id = input.personaConfigId;
-  }
-
-  if (input.promptTemplateId !== undefined) {
-    payload.prompt_template_id = input.promptTemplateId;
   }
 
   if (input.jobType !== undefined) {
@@ -422,12 +414,6 @@ async function createScheduledJob({ supabase, userId, payload }) {
     personaConfigId: input.personaConfigId,
   });
 
-  await assertPromptTemplateBelongsToUser({
-    supabase,
-    userId,
-    promptTemplateId: input.promptTemplateId || null,
-  });
-
   const insertPayload = buildInsertPayload({ userId, input });
 
   const { data, error } = await supabase
@@ -463,14 +449,6 @@ async function updateScheduledJob({ supabase, userId, id, payload }) {
       supabase,
       userId,
       personaConfigId: input.personaConfigId,
-    });
-  }
-
-  if (input.promptTemplateId !== undefined) {
-    await assertPromptTemplateBelongsToUser({
-      supabase,
-      userId,
-      promptTemplateId: input.promptTemplateId,
     });
   }
 
