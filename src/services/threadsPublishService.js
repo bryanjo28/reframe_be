@@ -76,6 +76,8 @@ function mapContentOutputRow(row) {
     topicId: row.topic_id,
     scheduledJobId: row.scheduled_job_id,
     scheduledJobRunId: row.scheduled_job_run_id,
+    publishScheduledJobId: row.publish_scheduled_job_id,
+    publishScheduledJobRunId: row.publish_scheduled_job_run_id,
     platform: row.platform,
     formatOutput: row.format_output,
     content: row.content,
@@ -106,6 +108,18 @@ function mapPublishedPostRow(row) {
     errorMessage: row.error_message,
     createdAt: row.created_at,
   };
+}
+
+function normalizeScheduledJobRow(row) {
+  if (!row) {
+    return null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(row, "targetCount")) {
+    return row;
+  }
+
+  return scheduledJobsService.mapScheduledJobRow(row);
 }
 
 async function requestThreadsApi(path, { method = "GET", accessToken, params = {}, body = null } = {}) {
@@ -354,19 +368,19 @@ async function scheduleApprovedContentOutputs({
   const scheduledJob = await scheduledJobsService.createScheduledJob({
     supabase,
     userId,
-      payload: {
+    payload: {
+      personaConfigId,
+      jobType: "threads_auto_post",
+      config: {
         personaConfigId,
-        jobType: "threads_auto_post",
-        config: {
-          personaConfigId,
-          scheduledAt,
-          contentOutputId,
-        },
-        targetCount: queryLimit,
+        scheduledAt,
+        contentOutputId,
+      },
+      targetCount: queryLimit,
       scheduleType: "once",
       scheduleValue: scheduledAt,
-      nextRunAt: scheduledAt,
-      status: "active",
+      nextRunAt: null,
+      status: "inactive",
     },
   });
 
@@ -377,7 +391,8 @@ async function scheduleApprovedContentOutputs({
       .from("content_outputs")
       .update({
         scheduled_at: scheduledAt,
-        scheduled_job_id: scheduledJob.id,
+        publish_scheduled_job_id: scheduledJob.id,
+        publish_scheduled_job_run_id: null,
       })
       .eq("id", row.id)
       .eq("user_id", userId)
@@ -395,8 +410,18 @@ async function scheduleApprovedContentOutputs({
     results.push(mapContentOutputRow(updatedRow));
   }
 
+  const activatedJob = await scheduledJobsService.updateScheduledJob({
+    supabase,
+    userId,
+    id: scheduledJob.id,
+    payload: {
+      nextRunAt: scheduledAt,
+      status: "active",
+    },
+  });
+
   return {
-    scheduledJob,
+    scheduledJob: activatedJob || scheduledJob,
     scheduledCount: results.length,
     availableCount: rows.length,
     results,
@@ -733,8 +758,18 @@ async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit 
     throw createHttpError(jobsError.message, 400, jobsError);
   }
 
-  const activeJobs = jobs || [];
-  console.log("[runScheduledThreadsJob] active jobs found:", activeJobs.length, activeJobs.map(j => ({ id: j.id, status: j.status, next_run_at: j.next_run_at })));
+  const activeJobs = (jobs || []).map(normalizeScheduledJobRow).filter(Boolean);
+  console.log(
+    "[runScheduledThreadsJob] active jobs found:",
+    activeJobs.length,
+    activeJobs.map((j) => ({
+      id: j.id,
+      status: j.status,
+      nextRunAt: j.nextRunAt,
+      targetCount: j.targetCount,
+      jobType: j.jobType,
+    }))
+  );
 
   if (!activeJobs.length) {
     return {
@@ -773,13 +808,17 @@ async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit 
       .from("content_outputs")
       .select("*")
       .eq("user_id", userId)
-      .eq("scheduled_job_id", scheduledJob.id)
+      .eq("publish_scheduled_job_id", scheduledJob.id)
       .eq("status", "approved")
       .ilike("platform", "threads")
-      .is("scheduled_job_run_id", null)
+      .is("publish_scheduled_job_run_id", null)
       .order("scheduled_at", { ascending: true })
       .order("created_at", { ascending: true })
-      .limit(scheduledJob.targetCount);
+      .limit(
+        Number.isInteger(scheduledJob.targetCount) && scheduledJob.targetCount > 0
+          ? scheduledJob.targetCount
+          : 10
+      );
 
     if (!force) {
       dueQuery = dueQuery.lte("scheduled_at", nowIso);
@@ -787,7 +826,49 @@ async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit 
 
     const { data: dueRows, error: dueError } = await dueQuery;
 
-    console.log("[runScheduledThreadsJob] due content_outputs for job", scheduledJob.id, ":", (dueRows || []).length, (dueRows || []).map(r => ({ id: r.id, status: r.status, platform: r.platform, scheduled_at: r.scheduled_at, scheduled_job_run_id: r.scheduled_job_run_id })));
+    console.log(
+      "[runScheduledThreadsJob] due content_outputs for job",
+      scheduledJob.id,
+      ":",
+      (dueRows || []).length,
+      (dueRows || []).map((r) => ({
+        id: r.id,
+        status: r.status,
+        platform: r.platform,
+        scheduled_at: r.scheduled_at,
+        publish_scheduled_job_id: r.publish_scheduled_job_id,
+        publish_scheduled_job_run_id: r.publish_scheduled_job_run_id,
+      }))
+    );
+
+    if (!dueError && (!dueRows || dueRows.length === 0)) {
+      const { data: linkedRows, error: linkedRowsError } = await supabase
+        .from("content_outputs")
+        .select("id, status, platform, scheduled_at, publish_scheduled_job_id, publish_scheduled_job_run_id")
+        .eq("user_id", userId)
+        .eq("publish_scheduled_job_id", scheduledJob.id)
+        .order("created_at", { ascending: true })
+        .limit(10);
+
+      const { data: userRows, error: userRowsError } = await supabase
+        .from("content_outputs")
+        .select("id, status, platform, scheduled_at, publish_scheduled_job_id, publish_scheduled_job_run_id")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(10);
+
+      console.log("[runScheduledThreadsJob] debug linked content_outputs:", {
+        scheduledJobId: scheduledJob.id,
+        linkedRowsError: linkedRowsError?.message || null,
+        linkedRows: linkedRows || [],
+      });
+
+      console.log("[runScheduledThreadsJob] debug recent user content_outputs:", {
+        userId,
+        userRowsError: userRowsError?.message || null,
+        userRows: userRows || [],
+      });
+    }
 
     if (dueError) {
       failedCount += 1;
@@ -807,11 +888,11 @@ async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit 
       const { data: claimedRow, error: claimError } = await supabase
         .from("content_outputs")
         .update({
-          scheduled_job_run_id: scheduledJobRun.id,
+          publish_scheduled_job_run_id: scheduledJobRun.id,
         })
         .eq("id", row.id)
         .eq("user_id", userId)
-        .is("scheduled_job_run_id", null)
+        .is("publish_scheduled_job_run_id", null)
         .select("*")
         .maybeSingle();
 

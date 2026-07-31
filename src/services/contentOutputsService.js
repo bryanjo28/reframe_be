@@ -122,6 +122,14 @@ function normalizeContentOutputPayload(payload = {}) {
       source,
       ["scheduledJobRunId", "scheduled_job_run_id"]
     ),
+    publishScheduledJobId: readOptionalText(
+      source,
+      ["publishScheduledJobId", "publish_scheduled_job_id"]
+    ),
+    publishScheduledJobRunId: readOptionalText(
+      source,
+      ["publishScheduledJobRunId", "publish_scheduled_job_run_id"]
+    ),
     promptTemplateId: readOptionalText(source, ["promptTemplateId", "prompt_template_id"]),
     platform: readOptionalText(source, ["platform"]),
     formatOutput: readOptionalText(source, ["formatOutput", "format_output"]),
@@ -203,6 +211,8 @@ function mapContentOutputRow(row) {
     topicId: row.topic_id,
     scheduledJobId: row.scheduled_job_id,
     scheduledJobRunId: row.scheduled_job_run_id,
+    publishScheduledJobId: row.publish_scheduled_job_id,
+    publishScheduledJobRunId: row.publish_scheduled_job_run_id,
     platform: row.platform,
     formatOutput: row.format_output,
     content: row.content,
@@ -236,6 +246,14 @@ function buildInsertPayload({ userId, input }) {
 
   if (input.scheduledJobRunId !== undefined) {
     payload.scheduled_job_run_id = input.scheduledJobRunId;
+  }
+
+  if (input.publishScheduledJobId !== undefined) {
+    payload.publish_scheduled_job_id = input.publishScheduledJobId;
+  }
+
+  if (input.publishScheduledJobRunId !== undefined) {
+    payload.publish_scheduled_job_run_id = input.publishScheduledJobRunId;
   }
 
   if (input.platform !== undefined) {
