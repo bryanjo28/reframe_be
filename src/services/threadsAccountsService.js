@@ -199,6 +199,24 @@ async function disconnectThreadsAccount({ supabase, userId }) {
     );
   }
 
+  const existingAccount = await getThreadsAccount({ supabase, userId });
+
+  if (!existingAccount) {
+    throw createHttpError("Threads account not found", 404);
+  }
+
+  const { error: publishedPostsError } = await supabase
+    .from("published_posts")
+    .update({
+      social_account_id: null,
+    })
+    .eq("user_id", userId)
+    .eq("social_account_id", existingAccount.id);
+
+  if (publishedPostsError) {
+    throw createHttpError(publishedPostsError.message, 400, publishedPostsError);
+  }
+
   const { data, error } = await supabase
     .from("social_accounts")
     .delete()
@@ -209,10 +227,6 @@ async function disconnectThreadsAccount({ supabase, userId }) {
 
   if (error) {
     throw createHttpError(error.message, 400, error);
-  }
-
-  if (!data) {
-    throw createHttpError("Threads account not found", 404);
   }
 
   return mapThreadsAccountRow(data);

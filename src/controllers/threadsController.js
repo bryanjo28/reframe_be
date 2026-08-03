@@ -1,5 +1,6 @@
 const threadsPublishService = require("../services/threadsPublishService");
 const threadsAuthService = require("../services/threadsAuthService");
+const threadsAccountsService = require("../services/threadsAccountsService");
 
 async function getConnectUrl(req, res, next) {
   try {
@@ -55,10 +56,15 @@ async function handleThreadsCallback(req, res, next) {
 
 async function handleThreadsDeleteCallback(req, res, next) {
   try {
+    const data = await threadsAccountsService.disconnectThreadsAccount({
+      supabase: req.supabase,
+      userId: req.user.id,
+    });
+
     return res.status(200).json({
       success: true,
-      message: "Threads delete callback received",
-      timestamp: new Date().toISOString(),
+      message: "Threads account disconnected successfully",
+      data,
     });
   } catch (error) {
     next(error);
