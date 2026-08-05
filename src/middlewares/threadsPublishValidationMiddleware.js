@@ -124,8 +124,46 @@ function validateRunScheduledThreadsJobRequest(req, res, next) {
   }
 }
 
+function normalizeRetryFailedThreadsPayload(payload = {}) {
+  const source = getSource(payload);
+
+  return {
+    contentOutputId: readOptionalText(source, ["contentOutputId", "content_output_id"]),
+    scheduledAt: readOptionalText(source, ["scheduledAt", "scheduled_at"]),
+  };
+}
+
+function validateRetryFailedThreadsRequest(req, res, next) {
+  try {
+    const threadsRetryInput = normalizeRetryFailedThreadsPayload(req.body);
+
+    if (!threadsRetryInput.contentOutputId) {
+      throw createHttpError("Missing required field: contentOutputId", 400);
+    }
+
+    if (!validateUuid(threadsRetryInput.contentOutputId)) {
+      throw createHttpError("contentOutputId must be a valid UUID", 400);
+    }
+
+    if (
+      threadsRetryInput.scheduledAt !== undefined &&
+      threadsRetryInput.scheduledAt !== null &&
+      Number.isNaN(Date.parse(threadsRetryInput.scheduledAt))
+    ) {
+      throw createHttpError("scheduledAt must be a valid date-time string", 400);
+    }
+
+    req.threadsRetryInput = threadsRetryInput;
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   normalizeAutoPostThreadsPayload,
+  normalizeRetryFailedThreadsPayload,
   validateAutoPostThreadsRequest,
+  validateRetryFailedThreadsRequest,
   validateRunScheduledThreadsJobRequest,
 };

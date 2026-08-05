@@ -8,6 +8,10 @@ const {
 
 const THREADS_API_BASE = "https://graph.threads.net";
 const THREADS_API_VERSION = "v1.0";
+const THREADS_POST_INTERVAL_MS = Math.max(
+  0,
+  Number.parseInt(process.env.THREADS_POST_INTERVAL_MS || "2000", 10) || 0
+);
 
 function createHttpError(message, status = 500, details) {
   const error = new Error(message);
@@ -120,6 +124,10 @@ function normalizeScheduledJobRow(row) {
   }
 
   return scheduledJobsService.mapScheduledJobRow(row);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function requestThreadsApi(path, { method = "GET", accessToken, params = {}, body = null } = {}) {
@@ -320,11 +328,14 @@ async function scheduleApprovedContentOutputs({
     .from("content_outputs")
     .select("*")
     .eq("user_id", userId)
-    .eq("persona_config_id", personaConfigId)
     .eq("status", "approved")
     .ilike("platform", "threads")
     .order("created_at", { ascending: true })
     .limit(queryLimit > 0 ? queryLimit : 10);
+
+  if (personaConfigId) {
+    query = query.eq("persona_config_id", personaConfigId);
+  }
 
   if (contentOutputId) {
     query = query.eq("id", contentOutputId);
@@ -526,6 +537,7 @@ async function markContentOutputFailed({ supabase, userId, contentOutputId }) {
     .update({
       status: "failed",
       external_post_id: null,
+      publish_scheduled_job_run_id: null,
     })
     .eq("id", contentOutputId)
     .eq("user_id", userId)
@@ -727,6 +739,92 @@ async function autoPostThreadsDrafts({ supabase, userId, payload = {} }) {
       scheduledAt: contentOutput.scheduledAt,
       contentOutput,
     })),
+  };
+}
+
+async function retryFailedThreadsPost({ supabase, userId, payload = {} }) {
+  const input = {
+    contentOutputId: payload.contentOutputId || payload.content_output_id || null,
+    scheduledAt: payload.scheduledAt || payload.scheduled_at || new Date().toISOString(),
+  };
+
+  if (!input.contentOutputId) {
+    throw createHttpError("Missing required field: contentOutputId", 400);
+  }
+
+  if (Number.isNaN(Date.parse(input.scheduledAt))) {
+    throw createHttpError("scheduledAt must be a valid date-time string", 400);
+  }
+
+  const { data: existingContentOutput, error: existingError } = await supabase
+    .from("content_outputs")
+    .select("*")
+    .eq("id", input.contentOutputId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (existingError) {
+    throw createHttpError(existingError.message, 400, existingError);
+  }
+
+  if (!existingContentOutput) {
+    throw createHttpError("Content output not found", 404);
+  }
+
+  if (!isThreadsPlatform(existingContentOutput.platform)) {
+    throw createHttpError("Content output platform must be Threads", 400);
+  }
+
+  if (normalizeRowValue(existingContentOutput.status).toLowerCase() === "posted") {
+    throw createHttpError("Posted content cannot be retried", 409);
+  }
+
+  if (normalizeRowValue(existingContentOutput.status).toLowerCase() !== "failed") {
+    throw createHttpError("Only failed content output can be retried", 409);
+  }
+
+  const { data: resetRow, error: resetError } = await supabase
+    .from("content_outputs")
+    .update({
+      status: "approved",
+      external_post_id: null,
+      publish_scheduled_job_id: null,
+      publish_scheduled_job_run_id: null,
+      scheduled_at: null,
+      retry_count: (Number(existingContentOutput.retry_count) || 0) + 1,
+    })
+    .eq("id", input.contentOutputId)
+    .eq("user_id", userId)
+    .select("*")
+    .maybeSingle();
+
+  if (resetError) {
+    throw createHttpError(resetError.message, 400, resetError);
+  }
+
+  if (!resetRow) {
+    throw createHttpError("Failed to prepare content output for retry", 404);
+  }
+
+  const scheduledBatch = await scheduleApprovedContentOutputs({
+    supabase,
+    userId,
+    personaConfigId: resetRow.persona_config_id,
+    limit: 1,
+    scheduledAt: input.scheduledAt,
+    contentOutputId: resetRow.id,
+  });
+
+  if (!scheduledBatch.results.length) {
+    throw createHttpError("Failed to schedule retry for content output", 500);
+  }
+
+  return {
+    retried: true,
+    contentOutputId: resetRow.id,
+    scheduledAt: scheduledBatch.results[0]?.scheduledAt || input.scheduledAt,
+    scheduledJob: scheduledBatch.scheduledJob,
+    contentOutput: scheduledBatch.results[0] || mapContentOutputRow(resetRow),
   };
 }
 
@@ -972,6 +1070,10 @@ async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit 
           status: "failed",
           error: error.message,
         });
+      } finally {
+        if (THREADS_POST_INTERVAL_MS > 0) {
+          await sleep(THREADS_POST_INTERVAL_MS);
+        }
       }
     }
 
@@ -1035,6 +1137,7 @@ module.exports = {
   getDraftContentOutputById,
   getDraftContentOutputs,
   publishSingleDraft,
+  retryFailedThreadsPost,
   scheduleApprovedContentOutputs,
   runScheduledThreadsJob,
   publishTextThread,

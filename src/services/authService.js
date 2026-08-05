@@ -133,9 +133,9 @@ function buildThreadsConnectionStatus(row) {
     return {
       connected: false,
       canUseToken: false,
-      needsReconnect: true,
-      status: "needs_reconnect",
-      reason: "Saved token is missing.",
+      needsReconnect: false,
+      status: "disconnected",
+      reason: "Threads account is disconnected.",
       accountId: row.username || null,
       threadsId: row.platform_user_id || null,
       expiresAt,
