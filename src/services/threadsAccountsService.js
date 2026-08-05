@@ -205,23 +205,15 @@ async function disconnectThreadsAccount({ supabase, userId }) {
     throw createHttpError("Threads account not found", 404);
   }
 
-  const { error: publishedPostsError } = await supabase
-    .from("published_posts")
-    .update({
-      social_account_id: null,
-    })
-    .eq("user_id", userId)
-    .eq("social_account_id", existingAccount.id);
-
-  if (publishedPostsError) {
-    throw createHttpError(publishedPostsError.message, 400, publishedPostsError);
-  }
-
   const { data, error } = await supabase
     .from("social_accounts")
-    .delete()
+    .update({
+      access_token: null,
+      refresh_token: null,
+      expires_at: null,
+    })
+    .eq("id", existingAccount.id)
     .eq("user_id", userId)
-    .eq("platform", "threads")
     .select("*")
     .maybeSingle();
 
