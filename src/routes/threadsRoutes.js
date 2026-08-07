@@ -8,6 +8,7 @@ const {
 } = require("../services/threadsPublishService");
 const {
   validateAutoPostThreadsRequest,
+  validateRetryFailedThreadsRequest,
   validateRunScheduledThreadsJobRequest,
 } = require("../middlewares/threadsPublishValidationMiddleware");
 
@@ -31,6 +32,13 @@ router.post(
   authMiddleware,
   validateRunScheduledThreadsJobRequest,
   threadsController.runScheduledThreadsJob
+);
+
+router.post(
+  "/auto-post/retry",
+  authMiddleware,
+  validateRetryFailedThreadsRequest,
+  threadsController.retryFailedThreadsPost
 );
 
 router.post("/post", async (req, res) => {

@@ -111,10 +111,29 @@ async function runScheduledThreadsJob(req, res, next) {
   }
 }
 
+async function retryFailedThreadsPost(req, res, next) {
+  try {
+    const data = await threadsPublishService.retryFailedThreadsPost({
+      supabase: req.supabase,
+      userId: req.user.id,
+      payload: req.threadsRetryInput || req.body,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Failed Threads post scheduled for retry successfully",
+      data,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   autoPostThreadsDrafts,
   getConnectUrl,
   handleThreadsCallback,
   handleThreadsDeleteCallback,
+  retryFailedThreadsPost,
   runScheduledThreadsJob,
 };
