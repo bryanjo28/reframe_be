@@ -45,10 +45,6 @@ function validateGenerateContentTopicsRequest(req, res, next) {
       throw createHttpError("Missing required field: contentPillarId", 400);
     }
 
-    if (!contentTopicGenerateInput.templateText) {
-      throw createHttpError("Missing required field: templateText", 400);
-    }
-
     if (
       contentTopicGenerateInput.jumlahTopics === undefined ||
       contentTopicGenerateInput.jumlahTopics === null

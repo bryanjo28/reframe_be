@@ -28,6 +28,20 @@ async function login(req, res, next) {
   }
 }
 
+async function resendVerificationEmail(req, res, next) {
+  try {
+    const result = await authService.resendVerificationEmail(req.authInput || req.body);
+
+    res.status(200).json({
+      success: true,
+      message: "Verification email resent successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function me(req, res, next) {
   try {
     const result = await authService.getCurrentUserProfile({
@@ -136,5 +150,6 @@ module.exports = {
   meThreads,
   logout,
   register,
+  resendVerificationEmail,
   updateMe,
 };

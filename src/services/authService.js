@@ -333,6 +333,35 @@ function normalizeAuthResponse({ user, session, profile }) {
   };
 }
 
+async function getActiveFreePlan() {
+  if (!isSupabaseAdminConfigured || !supabaseAdmin) {
+    throw createHttpError(
+      "Supabase admin client is not configured. Fill SUPABASE_SERVICE_ROLE_KEY first.",
+      500
+    );
+  }
+
+  const { data: freePlan, error: freePlanError } = await supabaseAdmin
+    .from("subscription_plans")
+    .select("id, code, name, max_personas, monthly_ai_credits, is_active")
+    .eq("code", "free")
+    .maybeSingle();
+
+  if (freePlanError) {
+    throw createHttpError(freePlanError.message, 400, freePlanError);
+  }
+
+  if (!freePlan) {
+    throw createHttpError("Free subscription plan not found", 404);
+  }
+
+  if (!freePlan.is_active) {
+    throw createHttpError("Free subscription plan is inactive", 403);
+  }
+
+  return freePlan;
+}
+
 async function ensureFreeSubscriptionForUser({ userId }) {
   if (!isSupabaseAdminConfigured || !supabaseAdmin) {
     throw createHttpError(
@@ -360,23 +389,7 @@ async function ensureFreeSubscriptionForUser({ userId }) {
     return existingSubscription;
   }
 
-  const { data: freePlan, error: freePlanError } = await supabaseAdmin
-    .from("subscription_plans")
-    .select("id, code, name, max_personas, monthly_ai_credits, is_active")
-    .eq("code", "free")
-    .maybeSingle();
-
-  if (freePlanError) {
-    throw createHttpError(freePlanError.message, 400, freePlanError);
-  }
-
-  if (!freePlan) {
-    throw createHttpError("Free subscription plan not found", 404);
-  }
-
-  if (!freePlan.is_active) {
-    throw createHttpError("Free subscription plan is inactive", 403);
-  }
+  const freePlan = await getActiveFreePlan();
 
   const { data: createdSubscription, error: createSubscriptionError } = await supabaseAdmin
     .from("user_subscriptions")
@@ -431,6 +444,7 @@ async function register({ email, password, accountName, fullName }) {
   });
 
   assertRequiredAuthFields(normalizedInput, ["email", "password", "accountName"]);
+  await getActiveFreePlan();
 
   const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
     email: normalizedInput.email,
@@ -469,6 +483,32 @@ async function register({ email, password, accountName, fullName }) {
       profile,
     }),
     emailConfirmationRequired: !signUpData.session,
+  };
+}
+
+async function resendVerificationEmail({ email }) {
+  if (!isSupabaseConfigured || !supabase) {
+    throw createHttpError(
+      "Supabase is not configured. Fill SUPABASE_URL and SUPABASE_ANON_KEY first.",
+      500
+    );
+  }
+
+  const normalizedInput = normalizeAuthPayload({ email });
+  assertRequiredAuthFields(normalizedInput, ["email"]);
+
+  const { error } = await supabase.auth.resend({
+    type: "signup",
+    email: normalizedInput.email,
+  });
+
+  if (error) {
+    throw createHttpError(error.message, 400, error);
+  }
+
+  return {
+    email: normalizedInput.email,
+    resent: true,
   };
 }
 
@@ -660,6 +700,7 @@ module.exports = {
   logout,
   getThreadsConnectionStatus,
   register,
+  resendVerificationEmail,
   updateCurrentUserProfile,
   buildThreadsConnectionStatus,
 };

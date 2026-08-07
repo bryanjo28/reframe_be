@@ -27,7 +27,20 @@ function validateLoginRequest(req, res, next) {
   }
 }
 
+function validateResendVerificationRequest(req, res, next) {
+  try {
+    const authInput = normalizeAuthPayload(req.body);
+    assertRequiredAuthFields(authInput, ["email"]);
+
+    req.authInput = authInput;
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   validateLoginRequest,
   validateRegisterRequest,
+  validateResendVerificationRequest,
 };

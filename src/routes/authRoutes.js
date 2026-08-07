@@ -5,6 +5,7 @@ const authMiddleware = require("../middlewares/authMiddleware");
 const {
   validateLoginRequest,
   validateRegisterRequest,
+  validateResendVerificationRequest,
 } = require("../middlewares/authValidationMiddleware");
 
 const router = express.Router();
@@ -30,6 +31,11 @@ router.post("/register", (req, res, next) => {
 });
 
 router.post("/login", validateLoginRequest, authController.login);
+router.post(
+  "/resend-verification",
+  validateResendVerificationRequest,
+  authController.resendVerificationEmail
+);
 router.get("/me", authMiddleware, authController.me);
 // router.get("/me/threads", authMiddleware, authController.meThreads);
 router.patch("/me", authMiddleware, authController.updateMe);

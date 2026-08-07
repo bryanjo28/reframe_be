@@ -78,10 +78,6 @@ function assertGenerateContentTopicsPayload(payload) {
     throw createHttpError("Missing required field: contentPillarId", 400);
   }
 
-  if (!payload.templateText || payload.templateText.length === 0) {
-    throw createHttpError("Missing required field: templateText", 400);
-  }
-
   if (payload.jumlahTopics === undefined || payload.jumlahTopics === null) {
     throw createHttpError("Missing required field: jumlahTopics", 400);
   }
@@ -184,6 +180,13 @@ async function getOwnedContentPillarWithPersona({ supabase, userId, contentPilla
 }
 
 function buildTopicGenerationPrompt({ contentPillar, personaConfig, templateText, jumlahTopics }) {
+  const promptTemplateText =
+    templateText ||
+    contentPillar?.userReviewEdit ||
+    contentPillar?.aiEnhancedVersion ||
+    contentPillar?.templateContent ||
+    "Buatkan ide topik yang relevan berdasarkan konteks content pillar dan persona berikut.";
+
   return [
     "Kamu adalah asisten yang membuat daftar ide content topic untuk konten media sosial.",
     "Balas HANYA dalam JSON valid tanpa markdown, tanpa code fence, tanpa penjelasan tambahan.",
@@ -193,7 +196,7 @@ function buildTopicGenerationPrompt({ contentPillar, personaConfig, templateText
     `Jumlah topics yang harus dibuat: ${jumlahTopics}`,
     "",
     "Template / arahan utama:",
-    templateText,
+    promptTemplateText,
     "",
     "Konteks content pillar:",
     `- pillar_name: ${contentPillar?.pillarName || "-"}`,
