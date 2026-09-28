@@ -4,6 +4,7 @@ const authController = require("../controllers/authController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const {
   validateLoginRequest,
+  validateForgotPasswordRequest,
   validateRegisterRequest,
   validateResendVerificationRequest,
 } = require("../middlewares/authValidationMiddleware");
@@ -36,6 +37,12 @@ router.post(
   validateResendVerificationRequest,
   authController.resendVerificationEmail
 );
+router.post(
+  "/forgot-password",
+  validateForgotPasswordRequest,
+  authController.forgotPassword
+);
+router.post("/reset-password", authMiddleware, authController.resetPassword);
 router.get("/me", authMiddleware, authController.me);
 // router.get("/me/threads", authMiddleware, authController.meThreads);
 router.patch("/me", authMiddleware, authController.updateMe);

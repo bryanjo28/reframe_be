@@ -1,4 +1,5 @@
 ﻿const {
+  createSupabaseAuthClient,
   createSupabaseUserClient,
   isSupabaseAdminConfigured,
   isSupabaseConfigured,
@@ -6,7 +7,7 @@
   supabaseAdmin,
 } = require("../config/supabase");
 
-function createHttpError(message, status = 500, details) {
+function createHttpError(message, status = 500, details, code) {
   const error = new Error(message);
   error.status = status;
 
@@ -14,7 +15,35 @@ function createHttpError(message, status = 500, details) {
     error.details = details;
   }
 
+  if (code) {
+    error.code = code;
+  }
+
   return error;
+}
+
+function createRegistrationError(error) {
+  const duplicateEmailCodes = new Set(["email_exists", "user_already_exists"]);
+
+  if (duplicateEmailCodes.has(error?.code)) {
+    return createHttpError(
+      "Email is already registered",
+      409,
+      error,
+      "EMAIL_ALREADY_EXISTS"
+    );
+  }
+
+  return createHttpError(
+    error?.message || "Registration failed",
+    Number.isInteger(Number(error?.status)) &&
+      Number(error.status) >= 400 &&
+      Number(error.status) <= 599
+      ? Number(error.status)
+      : 400,
+    error,
+    "REGISTRATION_FAILED"
+  );
 }
 
 function isAuthDebugEnabled() {
@@ -315,6 +344,30 @@ function assertValidPasswordChangePayload(payload) {
   }
 }
 
+function assertValidPasswordResetPayload(payload) {
+  const missingFields = [];
+
+  if (!payload.newPassword || String(payload.newPassword).trim().length === 0) {
+    missingFields.push("newPassword");
+  }
+
+  if (!payload.confirmPassword || String(payload.confirmPassword).trim().length === 0) {
+    missingFields.push("confirmPassword");
+  }
+
+  if (missingFields.length > 0) {
+    throw createHttpError(`Missing required fields: ${missingFields.join(", ")}`, 400);
+  }
+
+  if (String(payload.newPassword) !== String(payload.confirmPassword)) {
+    throw createHttpError("newPassword and confirmPassword do not match", 400);
+  }
+
+  if (String(payload.newPassword).length < 8) {
+    throw createHttpError("newPassword must be at least 8 characters", 400);
+  }
+}
+
 function normalizeAuthResponse({ user, session, profile }) {
   return {
     user: {
@@ -330,6 +383,30 @@ function normalizeAuthResponse({ user, session, profile }) {
           tokenType: session.token_type,
         }
       : null,
+  };
+}
+
+function assertEmailConfirmed(user) {
+  if (!user?.email_confirmed_at) {
+    throw createHttpError(
+      "Email belum diverifikasi",
+      403,
+      undefined,
+      "EMAIL_NOT_VERIFIED"
+    );
+  }
+}
+
+function buildRegistrationResponse({ user, session, profile }) {
+  const emailConfirmationRequired = !user?.email_confirmed_at;
+
+  return {
+    ...normalizeAuthResponse({
+      user,
+      session: emailConfirmationRequired ? null : session,
+      profile: emailConfirmationRequired ? null : profile,
+    }),
+    emailConfirmationRequired,
   };
 }
 
@@ -360,6 +437,54 @@ async function getActiveFreePlan() {
   }
 
   return freePlan;
+}
+
+async function assertAccountNameAvailable(accountName, adminClient = supabaseAdmin) {
+  if (!adminClient) {
+    throw createHttpError(
+      "Supabase admin client is not configured. Fill SUPABASE_SERVICE_ROLE_KEY first.",
+      500
+    );
+  }
+
+  const { data: existingProfile, error } = await adminClient
+    .from("profiles")
+    .select("id")
+    .eq("account_name", accountName)
+    .maybeSingle();
+
+  if (error) {
+    throw createHttpError(error.message, 500, error, "ACCOUNT_NAME_CHECK_FAILED");
+  }
+
+  if (existingProfile) {
+    throw createHttpError(
+      "Account name is already registered",
+      409,
+      undefined,
+      "ACCOUNT_NAME_ALREADY_EXISTS"
+    );
+  }
+}
+
+async function resolveRegistrationError(error, accountName, adminClient = supabaseAdmin) {
+  const mayBeProfileInsertConflict =
+    error?.code === "unexpected_failure" &&
+    /database error saving new user/i.test(String(error?.message || ""));
+
+  if (!mayBeProfileInsertConflict) {
+    throw createRegistrationError(error);
+  }
+
+  try {
+    await assertAccountNameAvailable(accountName, adminClient);
+  } catch (accountNameError) {
+    if (accountNameError.code === "ACCOUNT_NAME_ALREADY_EXISTS") {
+      throw accountNameError;
+    }
+  }
+
+  throw createRegistrationError(error);
 }
 
 async function ensureFreeSubscriptionForUser({ userId }) {
@@ -428,8 +553,20 @@ async function getProfileByUserId({ userId, accessToken }) {
   return normalizeProfile(data);
 }
 
-async function register({ email, password, accountName, fullName }) {
-  if (!isSupabaseConfigured || !supabase) {
+async function register(
+  { email, password, accountName, fullName },
+  dependencies = {}
+) {
+  const authClient = dependencies.authClient || createSupabaseAuthClient();
+  const accountNameChecker =
+    dependencies.accountNameChecker || assertAccountNameAvailable;
+  const freePlanLoader = dependencies.freePlanLoader || getActiveFreePlan;
+  const profileLoader = dependencies.profileLoader || getProfileByUserId;
+  const subscriptionEnsurer =
+    dependencies.subscriptionEnsurer || ensureFreeSubscriptionForUser;
+  const adminClient = dependencies.adminClient || supabaseAdmin;
+
+  if (!authClient) {
     throw createHttpError(
       "Supabase is not configured. Fill SUPABASE_URL and SUPABASE_ANON_KEY first.",
       500
@@ -444,9 +581,10 @@ async function register({ email, password, accountName, fullName }) {
   });
 
   assertRequiredAuthFields(normalizedInput, ["email", "password", "accountName"]);
-  await getActiveFreePlan();
+  await accountNameChecker(normalizedInput.accountName, adminClient);
+  await freePlanLoader();
 
-  const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+  const { data: signUpData, error: signUpError } = await authClient.auth.signUp({
     email: normalizedInput.email,
     password: normalizedInput.password,
     options: {
@@ -458,32 +596,34 @@ async function register({ email, password, accountName, fullName }) {
   });
 
   if (signUpError) {
-    throw createHttpError(signUpError.message, 400, signUpError);
+    await resolveRegistrationError(
+      signUpError,
+      normalizedInput.accountName,
+      adminClient
+    );
   }
 
   if (!signUpData.user) {
     throw createHttpError("Supabase signup did not return a user.", 500);
   }
 
-  const profile = signUpData.session?.access_token
-    ? await getProfileByUserId({
+  const emailConfirmationRequired = !signUpData.user.email_confirmed_at;
+  const profile = !emailConfirmationRequired && signUpData.session?.access_token
+    ? await profileLoader({
         userId: signUpData.user.id,
         accessToken: signUpData.session.access_token,
       })
     : null;
 
-  await ensureFreeSubscriptionForUser({
+  await subscriptionEnsurer({
     userId: signUpData.user.id,
   });
 
-  return {
-    ...normalizeAuthResponse({
-      user: signUpData.user,
-      session: signUpData.session,
-      profile,
-    }),
-    emailConfirmationRequired: !signUpData.session,
-  };
+  return buildRegistrationResponse({
+    user: signUpData.user,
+    session: signUpData.session,
+    profile,
+  });
 }
 
 async function resendVerificationEmail({ email }) {
@@ -512,8 +652,36 @@ async function resendVerificationEmail({ email }) {
   };
 }
 
-async function login({ email, password }) {
-  if (!isSupabaseConfigured || !supabase) {
+async function requestPasswordReset({ email, redirectTo }, authClient = supabase) {
+  if (!isSupabaseConfigured && authClient === supabase) {
+    throw createHttpError(
+      "Supabase is not configured. Fill SUPABASE_URL and SUPABASE_ANON_KEY first.",
+      500
+    );
+  }
+
+  const normalizedInput = normalizeAuthPayload({ email });
+  assertRequiredAuthFields(normalizedInput, ["email"]);
+
+  const { error } = await authClient.auth.resetPasswordForEmail(
+    normalizedInput.email,
+    { redirectTo }
+  );
+
+  if (error) {
+    throw createHttpError(error.message, 400, error);
+  }
+
+  return { emailSent: true };
+}
+
+async function login({ email, password }, dependencies = {}) {
+  const authClient = dependencies.authClient || createSupabaseAuthClient();
+  const profileLoader = dependencies.profileLoader || getProfileByUserId;
+  const subscriptionEnsurer =
+    dependencies.subscriptionEnsurer || ensureFreeSubscriptionForUser;
+
+  if (!authClient) {
     throw createHttpError(
       "Supabase is not configured. Fill SUPABASE_URL and SUPABASE_ANON_KEY first.",
       500
@@ -523,21 +691,32 @@ async function login({ email, password }) {
   const normalizedInput = normalizeAuthPayload({ email, password });
   assertRequiredAuthFields(normalizedInput, ["email", "password"]);
 
-  const { data, error } = await supabase.auth.signInWithPassword({
+  const { data, error } = await authClient.auth.signInWithPassword({
     email: normalizedInput.email,
     password: normalizedInput.password,
   });
 
   if (error) {
+    if (error.code === "email_not_confirmed") {
+      throw createHttpError(
+        "Email belum diverifikasi",
+        403,
+        error,
+        "EMAIL_NOT_VERIFIED"
+      );
+    }
+
     throw createHttpError(error.message, 400, error);
   }
 
-  const profile = await getProfileByUserId({
+  assertEmailConfirmed(data.user);
+
+  const profile = await profileLoader({
     userId: data.user.id,
     accessToken: data.session?.access_token,
   });
 
-  await ensureFreeSubscriptionForUser({
+  await subscriptionEnsurer({
     userId: data.user.id,
   });
 
@@ -564,10 +743,24 @@ async function getCurrentUserProfile({ user, supabase }) {
     userId: user.id,
   });
 
+  const { data: personaConfig, error: personaConfigError } = await supabase
+    .from("persona_configs")
+    .select("id")
+    .eq("user_id", user.id)
+    .limit(1)
+    .maybeSingle();
+
+  if (personaConfigError) {
+    throw createHttpError(personaConfigError.message, 500, personaConfigError);
+  }
+
   debugAuthLog("me-response", {
     userId: user.id,
     email: user.email,
     profile: normalizeProfile(data),
+    onboarding: {
+      hasPersona: Boolean(personaConfig),
+    },
     socialAccounts: {
       threads: threadsConnection,
     },
@@ -579,6 +772,9 @@ async function getCurrentUserProfile({ user, supabase }) {
       email: user.email,
     },
     profile: normalizeProfile(data),
+    onboarding: {
+      hasPersona: Boolean(personaConfig),
+    },
     socialAccounts: {
       threads: threadsConnection,
     },
@@ -672,6 +868,24 @@ async function changePassword({ user, supabase, currentPassword, newPassword, co
   };
 }
 
+async function resetPassword({ supabase, newPassword, confirmPassword }) {
+  const normalizedInput = normalizePasswordChangePayload({
+    newPassword,
+    confirmPassword,
+  });
+  assertValidPasswordResetPayload(normalizedInput);
+
+  const { data, error } = await supabase.auth.updateUser({
+    password: normalizedInput.newPassword,
+  });
+
+  if (error) {
+    throw createHttpError(error.message, 400, error);
+  }
+
+  return { user: data.user };
+}
+
 async function logout({ supabase }) {
   if (!supabase) {
     throw createHttpError("Supabase client is not available", 500);
@@ -689,8 +903,11 @@ async function logout({ supabase }) {
 }
 
 module.exports = {
+  assertAccountNameAvailable,
+  assertEmailConfirmed,
   assertRequiredAuthFields,
   changePassword,
+  createRegistrationError,
   ensureFreeSubscriptionForUser,
   getCurrentUserProfile,
   getCurrentUserThreadsConnection,
@@ -700,8 +917,12 @@ module.exports = {
   logout,
   getThreadsConnectionStatus,
   register,
+  requestPasswordReset,
+  resolveRegistrationError,
+  resetPassword,
   resendVerificationEmail,
   updateCurrentUserProfile,
   buildThreadsConnectionStatus,
+  buildRegistrationResponse,
 };
 
