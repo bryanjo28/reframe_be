@@ -39,7 +39,20 @@ function validateResendVerificationRequest(req, res, next) {
   }
 }
 
+function validateForgotPasswordRequest(req, res, next) {
+  try {
+    const authInput = normalizeAuthPayload(req.body);
+    assertRequiredAuthFields(authInput, ["email"]);
+
+    req.authInput = authInput;
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
+  validateForgotPasswordRequest,
   validateLoginRequest,
   validateRegisterRequest,
   validateResendVerificationRequest,

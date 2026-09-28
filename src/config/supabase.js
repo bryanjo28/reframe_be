@@ -22,6 +22,20 @@ const supabase = isSupabaseConfigured
     })
   : null;
 
+function createSupabaseAuthClient() {
+  if (!isSupabaseConfigured) {
+    return null;
+  }
+
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
+
 // ==============================
 // ADMIN CLIENT (BYPASS RLS)
 // ==============================
@@ -72,6 +86,7 @@ async function getUserFromToken(accessToken) {
 }
 
 module.exports = {
+  createSupabaseAuthClient,
   createSupabaseUserClient,
   getUserFromToken,
   isSupabaseAdminConfigured,

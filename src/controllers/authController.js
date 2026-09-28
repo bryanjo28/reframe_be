@@ -42,6 +42,40 @@ async function resendVerificationEmail(req, res, next) {
   }
 }
 
+async function forgotPassword(req, res, next) {
+  try {
+    await authService.requestPasswordReset({
+      email: (req.authInput || req.body).email,
+      redirectTo: `${process.env.FRONTEND_URL || "http://localhost:5173"}/reset-password`,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "If the email is registered, a password reset link has been sent",
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function resetPassword(req, res, next) {
+  try {
+    const result = await authService.resetPassword({
+      supabase: req.supabase,
+      newPassword: req.body.newPassword,
+      confirmPassword: req.body.confirmPassword,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Password reset successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function me(req, res, next) {
   try {
     const result = await authService.getCurrentUserProfile({
@@ -144,6 +178,7 @@ async function handleMetaUninstall(req, res, next) {
 
 module.exports = {
   changePassword,
+  forgotPassword,
   handleMetaUninstall,
   login,
   me,
@@ -151,5 +186,6 @@ module.exports = {
   logout,
   register,
   resendVerificationEmail,
+  resetPassword,
   updateMe,
 };
