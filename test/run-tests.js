@@ -1,5 +1,6 @@
 require("./authValidation.test");
 require("./contentOutputsValidation.test");
+require("./contentOutputsPrompt.test");
 require("./contentPillarsValidation.test");
 require("./contentTopicsGeneration.test");
 require("./personaConfigsValidation.test");
@@ -8,6 +9,7 @@ require("./authSubscriptionAssignment.test");
 require("./threadsAccountsValidation.test");
 require("./threadsAuthService.test");
 require("./threadsPublishValidation.test");
+require("./threadsPublishChain.test");
 require("./scheduledJobsValidation.test");
 require("./userUsageService.test");
 require("./subscriptionUsageService.test");

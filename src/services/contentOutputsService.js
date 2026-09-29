@@ -133,6 +133,7 @@ function normalizeContentOutputPayload(payload = {}) {
     promptTemplateId: readOptionalText(source, ["promptTemplateId", "prompt_template_id"]),
     platform: readOptionalText(source, ["platform"]),
     formatOutput: readOptionalText(source, ["formatOutput", "format_output"]),
+    threadType: readOptionalText(source, ["threadType", "thread_type"]),
     content: readOptionalText(source, ["content"]),
     status: readOptionalText(source, ["status"]),
     scheduledAt: readOptionalText(source, ["scheduledAt", "scheduled_at"]),
@@ -198,6 +199,33 @@ function assertAutoGenerateContentOutputsPayload(payload) {
   }
 }
 
+function parseThreadParts(content, threadType = "short") {
+  const normalizedContent = String(content || "").trim();
+  const parts = (threadType === "long"
+    ? normalizedContent.split("---THREAD_SPLIT---")
+    : [normalizedContent]
+  )
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length === 0) {
+    throw createHttpError("Thread content is empty", 400);
+  }
+
+  if (parts.some((part) => part.length > 500)) {
+    throw createHttpError(
+      "Each Threads post must not exceed 500 characters",
+      400
+    );
+  }
+
+  return parts;
+}
+
+function resolveContentOutputThreadType(contentPillar, input = {}) {
+  return contentPillar?.threadType || input.threadType || "short";
+}
+
 function mapContentOutputRow(row) {
   if (!row) {
     return null;
@@ -215,6 +243,7 @@ function mapContentOutputRow(row) {
     publishScheduledJobRunId: row.publish_scheduled_job_run_id,
     platform: row.platform,
     formatOutput: row.format_output,
+    threadType: row.thread_type || "short",
     content: row.content,
     status: row.status,
     createdAt: row.created_at,
@@ -230,6 +259,7 @@ function buildInsertPayload({ userId, input }) {
     user_id: userId,
     persona_config_id: input.personaConfigId,
     content: input.content,
+    thread_type: input.threadType || "short",
   };
 
   if (input.contentPillarId !== undefined) {
@@ -498,15 +528,29 @@ function buildContentOutputUserPrompt({
   promptContext,
   sourceContentOutput,
 }) {
+  const threadType = contentPillar?.threadType || promptContext.threadType || "short";
+  const threadRequirements =
+    threadType === "long"
+      ? [
+          "1. Buat long thread berupa post utama dan beberapa reply berurutan.",
+          "2. Setiap bagian maksimal 450 karakter termasuk spasi.",
+          "3. Pisahkan setiap bagian tepat dengan delimiter ---THREAD_SPLIT---.",
+          "4. Setiap bagian harus berupa kalimat utuh dan tidak terpotong.",
+          "5. Bagian pertama harus memiliki hook yang kuat.",
+          "6. Bagian terakhir dapat berisi kesimpulan atau CTA.",
+        ]
+      : [
+          "1. Buat satu short thread yang langsung siap dipakai.",
+          "2. Seluruh output maksimal 450 karakter termasuk spasi.",
+          "3. Jangan membuat reply lanjutan.",
+        ];
+
   const lines = [
     "Buat satu content output final yang siap dipakai.",
     "",
     "Konteks utama:",
     `- Topic: ${topic?.topic || promptContext.topic || "-"}`,
     `- Category: ${promptContext.category || "-"}`,
-    `- Subcategory: ${promptContext.subcategory || "-"}`,
-    `- Platform: ${promptContext.platform || "-"}`,
-    `- Format Output: ${promptContext.formatOutput || "-"}`,
     "",
     "Persona:",
     `- Persona: ${persona?.persona || promptContext.persona || "-"}`,
@@ -531,19 +575,14 @@ function buildContentOutputUserPrompt({
           "",
         ].join("\n")
       : "",
-    promptContext.additionalPrompt
-      ? `Instruksi tambahan dari user: ${promptContext.additionalPrompt}`
-      : "",
-    promptContext.improvementHint
-      ? `Fokus perbaikan: ${promptContext.improvementHint}`
-      : "",
     "",
     "Output requirements:",
-    "1. Tulis satu output final yang langsung siap dipakai.",
-    "2. Kalau cocok, buat hook yang kuat di awal.",
-    "3. Jangan bertele-tele.",
-    "4. Jika ada CTA link, letakkan natural di bagian yang relevan.",
-    "5. Jangan pakai format JSON, cukup teks final.",
+    `- Thread type: ${threadType}`,
+    ...threadRequirements,
+    "- Kalau cocok, buat hook yang kuat di awal.",
+    "- Jangan bertele-tele.",
+    "- Jika ada CTA link, letakkan natural di bagian yang relevan.",
+    "- Jangan pakai format JSON, cukup teks final.",
   ].filter(Boolean);
 
   return lines.join("\n");
@@ -929,6 +968,7 @@ function buildPromptContext({ persona, topic, contentPillar, sourceContentOutput
     pillarKeyMessage: contentPillar?.keyMessage || "",
     pillarCtaDirection: contentPillar?.ctaDirection || "",
     pillarAffiliateLink: contentPillar?.affiliateLink || "",
+    threadType: contentPillar?.threadType || "short",
     category: topic?.category || "",
     subcategory: topic?.subcategory || "",
     topic: topic?.topic || "",
@@ -1046,6 +1086,7 @@ async function createContentOutput({ supabase, userId, payload }) {
     input: {
       ...input,
       contentPillarId: contentPillar?.id || input.contentPillarId || topic?.content_pillar_id || null,
+      threadType: resolveContentOutputThreadType(contentPillar, input),
     },
   });
   const { data, error } = await supabase
@@ -1180,6 +1221,7 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
         topicId: topic.id,
         platform: workingInput.platform || promptContext.platform || "threads",
         formatOutput: workingInput.formatOutput || promptContext.formatOutput || null,
+        threadType: resolveContentOutputThreadType(contentPillar, workingInput),
         content: generatedContent,
         status: workingInput.status || "draft",
         scheduledAt: workingInput.scheduledAt || null,
@@ -1770,6 +1812,8 @@ async function deleteContentOutput({ supabase, userId, id }) {
 }
 
 module.exports = {
+  buildContentOutputInsertPayload: buildInsertPayload,
+  buildContentOutputUserPrompt,
   createContentOutput,
   createScheduledJobRun,
   deleteContentOutput,
@@ -1779,9 +1823,12 @@ module.exports = {
   generateContentOutput,
   getContentOutputById,
   listContentOutputs,
+  mapContentOutputRow,
   normalizeAutoGenerateContentOutputsPayload,
   normalizeContentOutputPayload,
   normalizeGenerateContentOutputDemoPayload,
+  parseThreadParts,
+  resolveContentOutputThreadType,
   updateContentOutput,
   updateScheduledJobRun,
 };
