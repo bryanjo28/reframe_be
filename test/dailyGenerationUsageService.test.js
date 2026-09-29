@@ -187,4 +187,37 @@ function createFakeSupabase({ subscriptionRow, planRow, dailyUsageRow = null }) 
     assert.equal(receivedError.message, "Daily generation limit exceeded");
     assert.equal(supabase.state.insertedPayload, null);
   });
+
+  await run("consumeDailyGenerationHit uses the privileged usage client", async () => {
+    const usageSupabase = createFakeSupabase({
+      subscriptionRow: {
+        id: "sub-1",
+        user_id: "user-1",
+        plan_id: "plan-1",
+        status: "active",
+      },
+      planRow: {
+        id: "plan-1",
+        daily_topic_generations: 5,
+        daily_content_generations: 10,
+        monthly_ai_credits: 1000,
+        is_active: true,
+      },
+    });
+    const userSupabase = {
+      from() {
+        throw new Error("user client must not write usage tables");
+      },
+    };
+
+    await consumeDailyGenerationHit({
+      supabase: userSupabase,
+      usageSupabase,
+      userId: "user-1",
+      usageKey: "generate_topic",
+      now: new Date("2026-06-07T00:00:00.000Z"),
+    });
+
+    assert.equal(usageSupabase.state.insertedPayload.user_id, "user-1");
+  });
 })();

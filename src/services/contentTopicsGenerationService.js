@@ -1,4 +1,4 @@
-const { isSupabaseConfigured } = require("../config/supabase");
+const { isSupabaseConfigured, supabaseAdmin } = require("../config/supabase");
 const sumopodService = require("./sumopodService");
 const { createGenerationTopicLog } = require("./generationTopicLogsService");
 const { consumeDailyGenerationHit } = require("./dailyGenerationUsageService");
@@ -320,12 +320,13 @@ async function generateContentTopics({ supabase, userId, payload }) {
   try {
     const dailyUsage = await consumeDailyGenerationHit({
       supabase,
+      usageSupabase: supabaseAdmin,
       userId,
       usageKey: "generate_topic",
     });
 
     const result = await sumopodService.generateChatCompletion({
-      model: "gpt-4o-mini",
+      model: "gpt-5-mini",
       maxTokens: 1200,
       temperature: 0.7,
       messages: [
@@ -346,6 +347,7 @@ async function generateContentTopics({ supabase, userId, payload }) {
 
     const subscriptionUsage = await consumeMonthlyAiCredits({
       supabase,
+      usageSupabase: supabaseAdmin,
       userId,
       usage: result.raw?.usage || null,
     });
