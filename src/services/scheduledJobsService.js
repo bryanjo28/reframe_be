@@ -184,6 +184,26 @@ function mapScheduledJobRow(row) {
   };
 }
 
+function buildScheduledJobProgress(run = {}) {
+  const targetCount = Math.max(0, Number(run.target_count) || 0);
+  const processedCount = Math.max(0, Number(run.processed_count) || 0);
+  const percentage = targetCount > 0
+    ? Math.min(100, Math.round((processedCount / targetCount) * 100))
+    : 0;
+
+  return {
+    status: run.status || "pending",
+    targetCount,
+    fetchedCount: Math.max(0, Number(run.fetched_count) || 0),
+    processedCount,
+    successCount: Math.max(0, Number(run.success_count) || 0),
+    failedCount: Math.max(0, Number(run.failed_count) || 0),
+    percentage,
+    startedAt: run.started_at || null,
+    finishedAt: run.finished_at || null,
+  };
+}
+
 function buildInsertPayload({ userId, input }) {
   const payload = {
     user_id: userId,
@@ -394,7 +414,32 @@ async function getScheduledJobById({ supabase, userId, id }) {
     throw createHttpError("Scheduled job not found", 404);
   }
 
-  return mapScheduledJobRow(data);
+  const { data: latestRun, error: runError } = await supabase
+    .from("scheduled_job_runs")
+    .select("*")
+    .eq("scheduled_job_id", id)
+    .eq("user_id", userId)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (runError) {
+    throw createHttpError(runError.message, 500, runError);
+  }
+
+  return {
+    ...mapScheduledJobRow(data),
+    progress: buildScheduledJobProgress(latestRun || {
+      status: data.status === "completed" ? "completed" : "pending",
+      target_count: data.target_count,
+      fetched_count: 0,
+      processed_count: 0,
+      success_count: 0,
+      failed_count: 0,
+      started_at: null,
+      finished_at: data.last_run_at || null,
+    }),
+  };
 }
 
 async function createScheduledJob({ supabase, userId, payload }) {
@@ -499,6 +544,7 @@ async function deleteScheduledJob({ supabase, userId, id }) {
 }
 
 module.exports = {
+  buildScheduledJobProgress,
   createScheduledJob,
   deleteScheduledJob,
   getScheduledJobById,

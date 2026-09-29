@@ -101,12 +101,19 @@ CREATE TABLE public.published_posts (
   parent_published_post_id uuid,
   sequence_number integer NOT NULL DEFAULT 1 CHECK (sequence_number >= 1),
   post_content text,
+  creation_id text,
+  publish_status text NOT NULL DEFAULT 'success'::text CHECK (publish_status = ANY (ARRAY['processing'::text, 'success'::text, 'failed'::text, 'uncertain'::text])),
+  publish_error_message text,
+  publish_started_at timestamp with time zone,
+  publish_finished_at timestamp with time zone,
   CONSTRAINT published_posts_pkey PRIMARY KEY (id),
   CONSTRAINT published_posts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
   CONSTRAINT published_posts_social_account_id_fkey FOREIGN KEY (social_account_id) REFERENCES public.social_accounts(id),
   CONSTRAINT published_posts_content_output_id_fkey FOREIGN KEY (content_output_id) REFERENCES public.content_outputs(id),
   CONSTRAINT published_posts_parent_published_post_id_fkey FOREIGN KEY (parent_published_post_id) REFERENCES public.published_posts(id)
 );
+CREATE UNIQUE INDEX uq_published_posts_output_sequence
+  ON public.published_posts (content_output_id, sequence_number);
 CREATE TABLE public.generation_logs (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
@@ -225,10 +232,16 @@ CREATE TABLE public.scheduled_jobs (
   last_run_status text,
   last_run_generated_count integer NOT NULL DEFAULT 0,
   last_run_error text,
+  locked_at timestamp with time zone,
+  lock_token uuid,
+  heartbeat_at timestamp with time zone,
   CONSTRAINT scheduled_jobs_pkey PRIMARY KEY (id),
   CONSTRAINT scheduled_jobs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
   CONSTRAINT scheduled_jobs_persona_config_id_fkey FOREIGN KEY (persona_config_id) REFERENCES public.persona_configs(id)
 );
+CREATE INDEX idx_scheduled_jobs_running_threads_heartbeat
+  ON public.scheduled_jobs (heartbeat_at)
+  WHERE status = 'running'::text AND job_type = 'threads_auto_post'::text;
 CREATE TABLE public.content_pillars (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,

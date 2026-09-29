@@ -1,11 +1,20 @@
 const threadsAccountsService = require("./threadsAccountsService");
 const threadsAuthService = require("./threadsAuthService");
 const scheduledJobsService = require("./scheduledJobsService");
+const { performance } = require("node:perf_hooks");
 const {
   createScheduledJobRun,
   parseThreadParts,
   updateScheduledJobRun,
 } = require("./contentOutputsService");
+const {
+  loadThreadPublishProgress,
+  markThreadSequenceFailure,
+  markThreadSequenceSuccess,
+  recordThreadContainer,
+  reserveThreadSequence,
+  validateThreadResumeState,
+} = require("./threadsPublishProgressService");
 
 const THREADS_API_BASE = "https://graph.threads.net";
 const THREADS_API_VERSION = "v1.0";
@@ -13,12 +22,19 @@ const THREADS_POST_INTERVAL_MS = Math.max(
   0,
   Number.parseInt(process.env.THREADS_POST_INTERVAL_MS || "2000", 10) || 0
 );
-const THREADS_REPLY_PROCESSING_DELAY_MS = Math.max(
-  0,
-  Number.parseInt(
-    process.env.THREADS_REPLY_PROCESSING_DELAY_MS || "40000",
-    10
-  ) || 0
+
+function getPositiveIntegerEnv(name, fallback) {
+  const value = Number.parseInt(process.env[name] || "", 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+const THREADS_CONTAINER_POLL_INTERVAL_MS = getPositiveIntegerEnv(
+  "THREADS_CONTAINER_POLL_INTERVAL_MS",
+  5000
+);
+const THREADS_CONTAINER_MAX_WAIT_MS = getPositiveIntegerEnv(
+  "THREADS_CONTAINER_MAX_WAIT_MS",
+  60000
 );
 
 function createHttpError(message, status = 500, details) {
@@ -123,6 +139,11 @@ function mapPublishedPostRow(row) {
     sequenceNumber: row.sequence_number,
     postContent: row.post_content,
     createdAt: row.created_at,
+    creationId: row.creation_id,
+    publishStatus: row.publish_status,
+    publishErrorMessage: row.publish_error_message,
+    publishStartedAt: row.publish_started_at,
+    publishFinishedAt: row.publish_finished_at,
   };
 }
 
@@ -142,7 +163,10 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function requestThreadsApi(path, { method = "GET", accessToken, params = {}, body = null } = {}) {
+async function requestThreadsApi(
+  path,
+  { method = "GET", accessToken, params = {}, body = null, signal } = {}
+) {
   const url = new URL(`${THREADS_API_BASE}/${THREADS_API_VERSION}/${path}`);
   const searchParams = new URLSearchParams();
 
@@ -160,6 +184,7 @@ async function requestThreadsApi(path, { method = "GET", accessToken, params = {
 
   const requestOptions = {
     method,
+    signal,
     headers: {
       Accept: "application/json",
     },
@@ -191,6 +216,116 @@ async function requestThreadsApi(path, { method = "GET", accessToken, params = {
   }
 
   return data;
+}
+
+async function waitForThreadsContainerReady({
+  accessToken,
+  creationId,
+  pollIntervalMs = THREADS_CONTAINER_POLL_INTERVAL_MS,
+  maxWaitMs = THREADS_CONTAINER_MAX_WAIT_MS,
+  requestApi = requestThreadsApi,
+  sleepFn = sleep,
+  nowFn = () => performance.now(),
+}) {
+  const resolvedPollIntervalMs = Math.max(1, Number(pollIntervalMs) || 1);
+  const resolvedMaxWaitMs = Math.max(1, Number(maxWaitMs) || 1);
+  const startedAt = nowFn();
+  let lastStatus = null;
+
+  function throwTimeout() {
+    console.error("[Threads Container] timeout", {
+      creationId,
+      maxWaitMs: resolvedMaxWaitMs,
+      lastStatus,
+    });
+    throw createHttpError(
+      `Threads container processing timed out after ${resolvedMaxWaitMs} ms`,
+      504,
+      { creationId, lastStatus }
+    );
+  }
+
+  console.log("[Threads Container] waiting", {
+    creationId,
+    maxWaitMs: resolvedMaxWaitMs,
+  });
+
+  while (nowFn() - startedAt < resolvedMaxWaitMs) {
+    const remainingBeforeRequestMs = resolvedMaxWaitMs - (nowFn() - startedAt);
+    const abortController = new AbortController();
+    const abortTimer = setTimeout(
+      () => abortController.abort(),
+      Math.max(1, Math.ceil(remainingBeforeRequestMs))
+    );
+    let statusResponse;
+
+    try {
+      statusResponse = await requestApi(creationId, {
+        method: "GET",
+        accessToken,
+        params: { fields: "id,status,error_message" },
+        signal: abortController.signal,
+      });
+    } catch (error) {
+      if (abortController.signal.aborted) {
+        throwTimeout();
+      }
+      throw error;
+    } finally {
+      clearTimeout(abortTimer);
+    }
+
+    const status = String(statusResponse?.status || "").trim().toUpperCase();
+    lastStatus = status || null;
+
+    console.log("[Threads Container] status", {
+      creationId,
+      status: lastStatus || "UNKNOWN",
+      elapsedMs: Math.round(nowFn() - startedAt),
+    });
+
+    if (status === "FINISHED") {
+      console.log("[Threads Container] ready", { creationId });
+      return statusResponse;
+    }
+
+    if (status === "ERROR") {
+      const apiMessage = statusResponse?.error_message;
+      throw createHttpError(
+        `Threads container processing failed${apiMessage ? `: ${apiMessage}` : ""}`,
+        502,
+        statusResponse
+      );
+    }
+
+    if (status === "EXPIRED") {
+      const apiMessage = statusResponse?.error_message;
+      throw createHttpError(
+        `Threads container expired${apiMessage ? `: ${apiMessage}` : ""}`,
+        502,
+        statusResponse
+      );
+    }
+
+    if (status === "PUBLISHED") {
+      throw createHttpError(
+        "Threads container has already been published",
+        409,
+        statusResponse
+      );
+    }
+
+    const elapsedMs = nowFn() - startedAt;
+    const remainingMs = resolvedMaxWaitMs - elapsedMs;
+
+    if (remainingMs <= 0) {
+      break;
+    }
+
+    await sleepFn(Math.min(resolvedPollIntervalMs, remainingMs));
+  }
+
+  throwTimeout();
 }
 
 function getPublishedPostUrl({ username, postId, responseData }) {
@@ -263,8 +398,14 @@ async function publishTextThread({
   content,
   replyToId = null,
   replyControl = "everyone",
-  processingDelayMs,
+  creationId: existingCreationId = null,
   requestApi = requestThreadsApi,
+  onContainerCreated,
+  onPublishStarted,
+  pollIntervalMs = THREADS_CONTAINER_POLL_INTERVAL_MS,
+  maxWaitMs = THREADS_CONTAINER_MAX_WAIT_MS,
+  sleepFn = sleep,
+  nowFn = () => performance.now(),
 }) {
   if (!content || String(content).trim().length === 0) {
     throw createHttpError("Content is empty", 400);
@@ -276,32 +417,44 @@ async function publishTextThread({
       400
     );
   }
-  const creationResponse = await requestApi(`${threadsId}/threads`, {
-    method: "POST",
-    accessToken,
-    params: {
-      media_type: "TEXT",
-      text: content,
-      reply_control: replyControl,
-      reply_to_id: replyToId,
-    },
-  });
+  let creationResponse = null;
+  let creationId = existingCreationId;
 
-  const creationId = creationResponse?.id || creationResponse?.creation_id;
+  if (!creationId) {
+    creationResponse = await requestApi(`${threadsId}/threads`, {
+      method: "POST",
+      accessToken,
+      params: {
+        media_type: "TEXT",
+        text: content,
+        reply_control: replyControl,
+        reply_to_id: replyToId,
+      },
+    });
+
+    creationId = creationResponse?.id || creationResponse?.creation_id;
+  }
 
   if (!creationId) {
     throw createHttpError("Threads API did not return a creation id", 502, creationResponse);
   }
 
-  const resolvedProcessingDelayMs =
-    processingDelayMs === undefined
-      ? replyToId
-        ? THREADS_REPLY_PROCESSING_DELAY_MS
-        : 0
-      : Math.max(0, Number(processingDelayMs) || 0);
+  if (!existingCreationId && onContainerCreated) {
+    await onContainerCreated({ creationId, rawCreationResponse: creationResponse });
+  }
 
-  if (resolvedProcessingDelayMs > 0) {
-    await sleep(resolvedProcessingDelayMs);
+  await waitForThreadsContainerReady({
+    accessToken,
+    creationId,
+    pollIntervalMs,
+    maxWaitMs,
+    requestApi,
+    sleepFn,
+    nowFn,
+  });
+
+  if (onPublishStarted) {
+    await onPublishStarted({ creationId });
   }
 
   const publishResponse = await requestApi(`${threadsId}/threads_publish`, {
@@ -312,8 +465,11 @@ async function publishTextThread({
     },
   });
 
-  const platformPostId =
-    publishResponse?.id || publishResponse?.post_id || publishResponse?.creation_id || creationId;
+  const platformPostId = publishResponse?.id || publishResponse?.post_id;
+
+  if (!platformPostId) {
+    throw createHttpError("Threads API did not return a post id", 502, publishResponse);
+  }
 
   return {
     creationId,
@@ -336,18 +492,47 @@ async function publishThreadChain({
   const publishedParts = [];
   let previousPlatformPostId = null;
 
+  console.log("[Threads Chain] started", {
+    threadType,
+    totalParts: threadParts.length,
+  });
+
   for (const [index, part] of threadParts.entries()) {
     const replyToId = previousPlatformPostId;
-    const publishResult = await publishPart({
-      accessToken,
-      threadsId,
-      content: part,
+    const sequenceNumber = index + 1;
+    console.log("[Threads Chain] sequence started", {
+      sequenceNumber,
+      totalParts: threadParts.length,
       replyToId,
-      replyControl,
+    });
+
+    let publishResult;
+    try {
+      publishResult = await publishPart({
+        accessToken,
+        threadsId,
+        content: part,
+        replyToId,
+        replyControl,
+      });
+    } catch (error) {
+      console.error("[Threads Chain] sequence failed", {
+        sequenceNumber,
+        totalParts: threadParts.length,
+        error: error.message,
+      });
+      throw error;
+    }
+
+    console.log("[Threads Chain] sequence published", {
+      sequenceNumber,
+      totalParts: threadParts.length,
+      platformPostId: publishResult.platformPostId,
+      replyToId,
     });
 
     const publishedPart = {
-      sequenceNumber: index + 1,
+      sequenceNumber,
       content: part,
       replyToId,
       ...publishResult,
@@ -360,6 +545,11 @@ async function publishThreadChain({
     publishedParts.push(publishedPart);
     previousPlatformPostId = publishResult.platformPostId;
   }
+
+  console.log("[Threads Chain] completed", {
+    rootPlatformPostId: publishedParts[0].platformPostId,
+    publishedCount: publishedParts.length,
+  });
 
   return {
     rootPlatformPostId: publishedParts[0].platformPostId,
@@ -621,41 +811,149 @@ async function publishAndPersistThreadChain({
   userId,
   account,
   contentOutput,
-  publishChain = publishThreadChain,
+  publishPart = publishTextThread,
+  assertLeaseOwnership = async () => {},
 }) {
-  const publishedPosts = [];
-  let previousPublishedPost = null;
+  const threadType = contentOutput.threadType || contentOutput.thread_type || "short";
+  const parts = parseThreadParts(contentOutput.content, threadType);
+  const storedRows = await loadThreadPublishProgress({
+    supabase,
+    userId,
+    contentOutputId: contentOutput.id,
+  });
+  const resumeState = validateThreadResumeState({ rows: storedRows, parts });
+  const publishedPosts = [...resumeState.completedRows];
+  const publishedParts = resumeState.completedRows.map((row) => ({
+    sequenceNumber: row.sequenceNumber,
+    content: row.postContent,
+    replyToId: null,
+    creationId: row.creationId,
+    platformPostId: row.platformPostId,
+  }));
+  let previousPublishedPost = publishedPosts.at(-1) || null;
+  let previousPlatformPostId = resumeState.previousPlatformPostId;
 
-  const chainResult = await publishChain({
-    accessToken: account.accessToken,
-    threadsId: account.threadsId,
-    content: contentOutput.content,
-    threadType: contentOutput.threadType || contentOutput.thread_type || "short",
-    onPartPublished: async (part) => {
+  console.log("[Threads Chain] resumed", {
+    contentOutputId: contentOutput.id,
+    completedCount: publishedPosts.length,
+    totalParts: parts.length,
+  });
+
+  for (let index = resumeState.nextSequenceNumber - 1; index < parts.length; index += 1) {
+    const sequenceNumber = index + 1;
+    const content = parts[index];
+    await assertLeaseOwnership();
+
+    let progressRow = await reserveThreadSequence({
+      supabase,
+      userId,
+      account,
+      contentOutput,
+      sequenceNumber,
+      content,
+      parentPublishedPostId: previousPublishedPost?.id || null,
+    });
+    let publishStarted = false;
+
+    console.log("[Threads Chain] sequence reserved", {
+      contentOutputId: contentOutput.id,
+      sequenceNumber,
+      publishedPostId: progressRow.id,
+    });
+
+    try {
+      const publishResult = await publishPart({
+        accessToken: account.accessToken,
+        threadsId: account.threadsId,
+        content,
+        replyToId: previousPlatformPostId,
+        creationId: progressRow.creationId,
+        onContainerCreated: async ({ creationId }) => {
+          progressRow = await recordThreadContainer({
+            supabase,
+            userId,
+            publishedPostId: progressRow.id,
+            creationId,
+          });
+          console.log("[Threads Chain] container persisted", {
+            contentOutputId: contentOutput.id,
+            sequenceNumber,
+            creationId,
+          });
+        },
+        onPublishStarted: async () => {
+          await assertLeaseOwnership();
+          progressRow = await markThreadSequenceFailure({
+            supabase,
+            userId,
+            publishedPostId: progressRow.id,
+            status: "uncertain",
+            errorMessage: "Threads publish request started; awaiting confirmation",
+          });
+          publishStarted = true;
+        },
+      });
       const postUrl = getPublishedPostUrl({
         username: account.accountId,
-        postId: part.platformPostId,
-        responseData: part.rawPublishResponse,
+        postId: publishResult.platformPostId,
+        responseData: publishResult.rawPublishResponse,
       });
-      const publishedPost = await savePublishedPost({
+      progressRow = await markThreadSequenceSuccess({
         supabase,
         userId,
-        socialAccountId: account.id,
-        contentOutputId: contentOutput.id,
-        platformPostId: part.platformPostId,
+        publishedPostId: progressRow.id,
+        platformPostId: publishResult.platformPostId,
         postUrl,
-        parentPublishedPostId: previousPublishedPost?.id || null,
-        sequenceNumber: part.sequenceNumber,
-        postContent: part.content,
       });
 
-      publishedPosts.push(publishedPost);
-      previousPublishedPost = publishedPost;
-    },
+      publishedPosts.push(progressRow);
+      publishedParts.push({
+        sequenceNumber,
+        content,
+        replyToId: previousPlatformPostId,
+        ...publishResult,
+      });
+      previousPublishedPost = progressRow;
+      previousPlatformPostId = progressRow.platformPostId;
+
+      console.log("[Threads Chain] sequence persisted", {
+        contentOutputId: contentOutput.id,
+        sequenceNumber,
+        platformPostId: progressRow.platformPostId,
+        publishedPostId: progressRow.id,
+      });
+    } catch (error) {
+      const failureStatus = publishStarted ? "uncertain" : "failed";
+      try {
+        await markThreadSequenceFailure({
+          supabase,
+          userId,
+          publishedPostId: progressRow.id,
+          status: failureStatus,
+          errorMessage: error.message,
+        });
+      } catch (persistenceError) {
+        if (failureStatus !== "uncertain") throw persistenceError;
+      }
+      if (failureStatus === "uncertain") {
+        console.error("[Threads Chain] uncertain", {
+          contentOutputId: contentOutput.id,
+          sequenceNumber,
+          error: error.message,
+        });
+      }
+      throw error;
+    }
+  }
+
+  console.log("[Threads Chain] completed", {
+    rootPlatformPostId: publishedPosts[0].platformPostId,
+    publishedCount: publishedPosts.length,
   });
 
   return {
-    ...chainResult,
+    rootPlatformPostId: publishedPosts[0].platformPostId,
+    parts: publishedParts,
     publishedPosts,
     rootPublishedPost: publishedPosts[0] || null,
   };
@@ -942,6 +1240,23 @@ async function retryFailedThreadsPost({ supabase, userId, payload = {} }) {
   };
 }
 
+async function claimScheduledThreadsJob({ supabase, userId, scheduledJobId }) {
+  const { data, error } = await supabase
+    .from("scheduled_jobs")
+    .update({ status: "running" })
+    .eq("id", scheduledJobId)
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw createHttpError(error.message, 400, error);
+  }
+
+  return normalizeScheduledJobRow(data);
+}
+
 async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit = 20, force = false }) {
   const nowIso = new Date().toISOString();
   const jobsFetchLimit = Number.isInteger(limit) ? limit : 20;
@@ -999,8 +1314,29 @@ async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit 
   const results = [];
   let successCount = 0;
   let failedCount = 0;
+  let skippedCount = 0;
 
-  for (const scheduledJob of activeJobs) {
+  for (const candidateJob of activeJobs) {
+    const scheduledJob = await claimScheduledThreadsJob({
+      supabase,
+      userId,
+      scheduledJobId: candidateJob.id,
+    });
+
+    if (!scheduledJob) {
+      skippedCount += 1;
+      console.log("[runScheduledThreadsJob] skipped job already claimed", {
+        scheduledJobId: candidateJob.id,
+        userId,
+      });
+      continue;
+    }
+
+    console.log("[runScheduledThreadsJob] claimed job", {
+      scheduledJobId: scheduledJob.id,
+      status: scheduledJob.status,
+    });
+
     const scheduledJobRun = await createScheduledJobRun({
       supabase,
       userId,
@@ -1084,6 +1420,29 @@ async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit 
 
     if (dueError) {
       failedCount += 1;
+      const finishedAt = new Date().toISOString();
+      await updateScheduledJobRun({
+        supabase,
+        userId,
+        id: scheduledJobRun.id,
+        payload: {
+          status: "failed",
+          failedCount: 1,
+          errorMessage: dueError.message,
+          finishedAt,
+        },
+      });
+      await supabase
+        .from("scheduled_jobs")
+        .update({
+          status: "failed",
+          last_run_at: finishedAt,
+          last_run_status: "failed",
+          last_run_error: dueError.message,
+          error_message: dueError.message,
+        })
+        .eq("id", scheduledJob.id)
+        .eq("user_id", userId);
       results.push({
         scheduledJobId: scheduledJob.id,
         status: "failed",
@@ -1230,6 +1589,7 @@ async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit 
       processedJobs: results.length,
       successCount,
       failedCount,
+        skippedCount,
     },
     results,
   };
@@ -1243,9 +1603,11 @@ module.exports = {
   retryFailedThreadsPost,
   scheduleApprovedContentOutputs,
   runScheduledThreadsJob,
+  claimScheduledThreadsJob,
   publishTextThread,
   publishThreadChain,
   publishAndPersistThreadChain,
   savePublishedPost,
   requestThreadsApi,
+  waitForThreadsContainerReady,
 };
