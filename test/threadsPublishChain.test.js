@@ -21,25 +21,33 @@ async function run(name, fn) {
 async function main() {
   await run("publishThreadChain publishes root and replies sequentially", async () => {
     const calls = [];
+    const logs = [];
+    const originalLog = console.log;
     let inFlight = 0;
     let maxInFlight = 0;
     const platformIds = ["root-id", "reply-1-id", "reply-2-id"];
 
-    const result = await publishThreadChain({
-      accessToken: "token",
-      threadsId: "threads-user",
-      content:
-        "Root---THREAD_SPLIT---Reply one---THREAD_SPLIT---Reply two",
-      threadType: "long",
-      publishPart: async (input) => {
-        inFlight += 1;
-        maxInFlight = Math.max(maxInFlight, inFlight);
-        calls.push(input);
-        await Promise.resolve();
-        inFlight -= 1;
-        return { platformPostId: platformIds[calls.length - 1] };
-      },
-    });
+    console.log = (message, details) => logs.push({ message, details });
+    let result;
+    try {
+      result = await publishThreadChain({
+        accessToken: "token",
+        threadsId: "threads-user",
+        content:
+          "Root---THREAD_SPLIT---Reply one---THREAD_SPLIT---Reply two",
+        threadType: "long",
+        publishPart: async (input) => {
+          inFlight += 1;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          calls.push(input);
+          await Promise.resolve();
+          inFlight -= 1;
+          return { platformPostId: platformIds[calls.length - 1] };
+        },
+      });
+    } finally {
+      console.log = originalLog;
+    }
 
     assert.equal(maxInFlight, 1);
     assert.deepEqual(
@@ -48,6 +56,14 @@ async function main() {
     );
     assert.equal(result.rootPlatformPostId, "root-id");
     assert.equal(result.parts.length, 3);
+    assert.deepEqual(
+      logs
+        .filter(({ message }) => message === "[Threads Chain] sequence published")
+        .map(({ details }) => details.sequenceNumber),
+      [1, 2, 3]
+    );
+    assert.equal(logs.at(-1).message, "[Threads Chain] completed");
+    assert.equal(logs.at(-1).details.publishedCount, 3);
   });
 
   await run("publishThreadChain validates every part before API calls", async () => {
@@ -72,13 +88,16 @@ async function main() {
 
   await run("publishTextThread sends reply_to_id when publishing a reply", async () => {
     const requests = [];
-    const responses = [{ id: "container-id" }, { id: "reply-id" }];
-    await publishTextThread({
+    const responses = [
+      { id: "container-id" },
+      { id: "container-id", status: "FINISHED" },
+      { id: "reply-id" },
+    ];
+    const result = await publishTextThread({
       accessToken: "token",
       threadsId: "threads-user",
       content: "Reply text",
       replyToId: "parent-platform-id",
-      processingDelayMs: 0,
       requestApi: async (path, options) => {
         requests.push({ path, options });
         return responses.shift();
@@ -86,6 +105,17 @@ async function main() {
     });
 
     assert.equal(requests[0].options.params.reply_to_id, "parent-platform-id");
+    assert.deepEqual(
+      requests.map((request) => request.path),
+      [
+        "threads-user/threads",
+        "container-id",
+        "threads-user/threads_publish",
+      ]
+    );
+    assert.equal(requests[1].options.params.fields, "id,status,error_message");
+    assert.equal(requests[2].options.params.creation_id, "container-id");
+    assert.equal(result.platformPostId, "reply-id");
   });
 
   await run("savePublishedPost persists sequence, content, and internal parent id", async () => {

@@ -31,13 +31,19 @@ async function runDueScheduledJobs() {
   for (const job of dueJobs) {
     try {
       if (job.job_type === "threads_auto_post") {
-        await runScheduledThreadsJob({
+        const result = await runScheduledThreadsJob({
           supabase: supabaseAdmin,
           userId: job.user_id,
           scheduledJobId: job.id,
           force: true,
         });
-        console.log(`[cron] Job ${job.id} for user ${job.user_id} completed`);
+        if (result.summary.processedJobs === 0) {
+          console.log(
+            `[cron] Job ${job.id} for user ${job.user_id} skipped; it was already claimed or no longer active`
+          );
+        } else {
+          console.log(`[cron] Job ${job.id} for user ${job.user_id} finished`, result.summary);
+        }
         continue;
       }
 
@@ -62,6 +68,18 @@ async function runDueScheduledJobs() {
       console.warn(`[cron] Unsupported job type ${job.job_type} for job ${job.id}`);
     } catch (err) {
       console.error(`[cron] Job ${job.id} for user ${job.user_id} failed:`, err.message);
+      await supabaseAdmin
+        .from("scheduled_jobs")
+        .update({
+          status: "failed",
+          last_run_status: "failed",
+          last_run_error: err.message,
+          error_message: err.message,
+          last_run_at: new Date().toISOString(),
+        })
+        .eq("id", job.id)
+        .eq("user_id", job.user_id)
+        .eq("status", "running");
     }
   }
 }
