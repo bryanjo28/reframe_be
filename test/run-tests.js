@@ -10,6 +10,7 @@ require("./threadsAccountsValidation.test");
 require("./threadsAuthService.test");
 require("./threadsPublishValidation.test");
 require("./threadsPublishChain.test");
+require("./threadsPublishProgress.test");
 require("./threadsContainerPolling.test");
 require("./scheduledThreadsClaim.test");
 require("./scheduledJobsValidation.test");
