@@ -84,9 +84,21 @@ async function runDueScheduledJobs() {
   }
 }
 
-function startCronJobs() {
+function isCronJobEnabled(value = process.env.CRON_JOB) {
+  return String(value || "").trim().toLowerCase() === "true";
+}
+
+function startCronJobs({
+  enabled = isCronJobEnabled(),
+  schedule = cron.schedule,
+} = {}) {
+  if (!enabled) {
+    console.log("[cron] Scheduler disabled (set CRON_JOB=TRUE to enable)");
+    return null;
+  }
+
   // run every minute
-  cron.schedule("* * * * *", async () => {
+  const task = schedule("* * * * *", async () => {
     try {
       await runDueScheduledJobs();
     } catch (err) {
@@ -95,6 +107,11 @@ function startCronJobs() {
   });
 
   console.log("[cron] Scheduler started — checking due jobs every minute");
+  return task;
 }
 
-module.exports = { startCronJobs };
+module.exports = {
+  isCronJobEnabled,
+  runDueScheduledJobs,
+  startCronJobs,
+};

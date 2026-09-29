@@ -1460,6 +1460,22 @@ async function autoGenerateContentOutputs({ supabase, userId, payload }) {
         error: error.message,
       });
     }
+
+    if (scheduledJobRun) {
+      await updateScheduledJobRun({
+        supabase,
+        userId,
+        id: scheduledJobRun.id,
+        payload: {
+          status: "running",
+          targetCount: requestedCount,
+          fetchedCount: topics.length,
+          processedCount: results.length,
+          successCount,
+          failedCount,
+        },
+      });
+    }
   }
 
   const finishedAt = new Date().toISOString();

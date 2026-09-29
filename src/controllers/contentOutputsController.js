@@ -69,17 +69,27 @@ async function generateContentOutput(req, res, next) {
   }
 }
 
+function buildScheduledAutoGenerateResponse(result) {
+  return {
+    success: true,
+    contents: [],
+    data: {
+      id: result.scheduledJob.id,
+      scheduledJob: result.scheduledJob,
+      summary: result.summary,
+    },
+  };
+}
+
 async function scheduleAutoGenerateContentOutputs(req, res, next) {
   try {
-    await contentOutputsService.scheduleAutoGenerateContentOutputs({
+    const data = await contentOutputsService.scheduleAutoGenerateContentOutputs({
       supabase: req.supabase,
       userId: req.user.id,
       payload: req.contentOutputAutoGenerateInput || req.body,
     });
 
-    res.status(201).json({
-      contents: [],
-    });
+    res.status(201).json(buildScheduledAutoGenerateResponse(data));
   } catch (error) {
     next(error);
   }
@@ -141,6 +151,7 @@ async function deleteContentOutput(req, res, next) {
 }
 
 module.exports = {
+  buildScheduledAutoGenerateResponse,
   createContentOutput,
   deleteContentOutput,
   scheduleAutoGenerateContentOutputs,

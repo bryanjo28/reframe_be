@@ -7,6 +7,14 @@ const {
   parseThreadParts,
   updateScheduledJobRun,
 } = require("./contentOutputsService");
+const {
+  loadThreadPublishProgress,
+  markThreadSequenceFailure,
+  markThreadSequenceSuccess,
+  recordThreadContainer,
+  reserveThreadSequence,
+  validateThreadResumeState,
+} = require("./threadsPublishProgressService");
 
 const THREADS_API_BASE = "https://graph.threads.net";
 const THREADS_API_VERSION = "v1.0";
@@ -390,6 +398,7 @@ async function publishTextThread({
   content,
   replyToId = null,
   replyControl = "everyone",
+  creationId: existingCreationId = null,
   requestApi = requestThreadsApi,
   onContainerCreated,
   onPublishStarted,
@@ -408,24 +417,29 @@ async function publishTextThread({
       400
     );
   }
-  const creationResponse = await requestApi(`${threadsId}/threads`, {
-    method: "POST",
-    accessToken,
-    params: {
-      media_type: "TEXT",
-      text: content,
-      reply_control: replyControl,
-      reply_to_id: replyToId,
-    },
-  });
+  let creationResponse = null;
+  let creationId = existingCreationId;
 
-  const creationId = creationResponse?.id || creationResponse?.creation_id;
+  if (!creationId) {
+    creationResponse = await requestApi(`${threadsId}/threads`, {
+      method: "POST",
+      accessToken,
+      params: {
+        media_type: "TEXT",
+        text: content,
+        reply_control: replyControl,
+        reply_to_id: replyToId,
+      },
+    });
+
+    creationId = creationResponse?.id || creationResponse?.creation_id;
+  }
 
   if (!creationId) {
     throw createHttpError("Threads API did not return a creation id", 502, creationResponse);
   }
 
-  if (onContainerCreated) {
+  if (!existingCreationId && onContainerCreated) {
     await onContainerCreated({ creationId, rawCreationResponse: creationResponse });
   }
 
@@ -451,8 +465,7 @@ async function publishTextThread({
     },
   });
 
-  const platformPostId =
-    publishResponse?.id || publishResponse?.post_id || publishResponse?.creation_id;
+  const platformPostId = publishResponse?.id || publishResponse?.post_id;
 
   if (!platformPostId) {
     throw createHttpError("Threads API did not return a post id", 502, publishResponse);
@@ -798,48 +811,149 @@ async function publishAndPersistThreadChain({
   userId,
   account,
   contentOutput,
-  publishChain = publishThreadChain,
+  publishPart = publishTextThread,
+  assertLeaseOwnership = async () => {},
 }) {
-  const publishedPosts = [];
-  let previousPublishedPost = null;
+  const threadType = contentOutput.threadType || contentOutput.thread_type || "short";
+  const parts = parseThreadParts(contentOutput.content, threadType);
+  const storedRows = await loadThreadPublishProgress({
+    supabase,
+    userId,
+    contentOutputId: contentOutput.id,
+  });
+  const resumeState = validateThreadResumeState({ rows: storedRows, parts });
+  const publishedPosts = [...resumeState.completedRows];
+  const publishedParts = resumeState.completedRows.map((row) => ({
+    sequenceNumber: row.sequenceNumber,
+    content: row.postContent,
+    replyToId: null,
+    creationId: row.creationId,
+    platformPostId: row.platformPostId,
+  }));
+  let previousPublishedPost = publishedPosts.at(-1) || null;
+  let previousPlatformPostId = resumeState.previousPlatformPostId;
 
-  const chainResult = await publishChain({
-    accessToken: account.accessToken,
-    threadsId: account.threadsId,
-    content: contentOutput.content,
-    threadType: contentOutput.threadType || contentOutput.thread_type || "short",
-    onPartPublished: async (part) => {
+  console.log("[Threads Chain] resumed", {
+    contentOutputId: contentOutput.id,
+    completedCount: publishedPosts.length,
+    totalParts: parts.length,
+  });
+
+  for (let index = resumeState.nextSequenceNumber - 1; index < parts.length; index += 1) {
+    const sequenceNumber = index + 1;
+    const content = parts[index];
+    await assertLeaseOwnership();
+
+    let progressRow = await reserveThreadSequence({
+      supabase,
+      userId,
+      account,
+      contentOutput,
+      sequenceNumber,
+      content,
+      parentPublishedPostId: previousPublishedPost?.id || null,
+    });
+    let publishStarted = false;
+
+    console.log("[Threads Chain] sequence reserved", {
+      contentOutputId: contentOutput.id,
+      sequenceNumber,
+      publishedPostId: progressRow.id,
+    });
+
+    try {
+      const publishResult = await publishPart({
+        accessToken: account.accessToken,
+        threadsId: account.threadsId,
+        content,
+        replyToId: previousPlatformPostId,
+        creationId: progressRow.creationId,
+        onContainerCreated: async ({ creationId }) => {
+          progressRow = await recordThreadContainer({
+            supabase,
+            userId,
+            publishedPostId: progressRow.id,
+            creationId,
+          });
+          console.log("[Threads Chain] container persisted", {
+            contentOutputId: contentOutput.id,
+            sequenceNumber,
+            creationId,
+          });
+        },
+        onPublishStarted: async () => {
+          await assertLeaseOwnership();
+          progressRow = await markThreadSequenceFailure({
+            supabase,
+            userId,
+            publishedPostId: progressRow.id,
+            status: "uncertain",
+            errorMessage: "Threads publish request started; awaiting confirmation",
+          });
+          publishStarted = true;
+        },
+      });
       const postUrl = getPublishedPostUrl({
         username: account.accountId,
-        postId: part.platformPostId,
-        responseData: part.rawPublishResponse,
+        postId: publishResult.platformPostId,
+        responseData: publishResult.rawPublishResponse,
       });
-      const publishedPost = await savePublishedPost({
+      progressRow = await markThreadSequenceSuccess({
         supabase,
         userId,
-        socialAccountId: account.id,
-        contentOutputId: contentOutput.id,
-        platformPostId: part.platformPostId,
+        publishedPostId: progressRow.id,
+        platformPostId: publishResult.platformPostId,
         postUrl,
-        parentPublishedPostId: previousPublishedPost?.id || null,
-        sequenceNumber: part.sequenceNumber,
-        postContent: part.content,
       });
 
-      publishedPosts.push(publishedPost);
-      previousPublishedPost = publishedPost;
+      publishedPosts.push(progressRow);
+      publishedParts.push({
+        sequenceNumber,
+        content,
+        replyToId: previousPlatformPostId,
+        ...publishResult,
+      });
+      previousPublishedPost = progressRow;
+      previousPlatformPostId = progressRow.platformPostId;
 
       console.log("[Threads Chain] sequence persisted", {
         contentOutputId: contentOutput.id,
-        sequenceNumber: part.sequenceNumber,
-        platformPostId: part.platformPostId,
-        publishedPostId: publishedPost.id,
+        sequenceNumber,
+        platformPostId: progressRow.platformPostId,
+        publishedPostId: progressRow.id,
       });
-    },
+    } catch (error) {
+      const failureStatus = publishStarted ? "uncertain" : "failed";
+      try {
+        await markThreadSequenceFailure({
+          supabase,
+          userId,
+          publishedPostId: progressRow.id,
+          status: failureStatus,
+          errorMessage: error.message,
+        });
+      } catch (persistenceError) {
+        if (failureStatus !== "uncertain") throw persistenceError;
+      }
+      if (failureStatus === "uncertain") {
+        console.error("[Threads Chain] uncertain", {
+          contentOutputId: contentOutput.id,
+          sequenceNumber,
+          error: error.message,
+        });
+      }
+      throw error;
+    }
+  }
+
+  console.log("[Threads Chain] completed", {
+    rootPlatformPostId: publishedPosts[0].platformPostId,
+    publishedCount: publishedPosts.length,
   });
 
   return {
-    ...chainResult,
+    rootPlatformPostId: publishedPosts[0].platformPostId,
+    parts: publishedParts,
     publishedPosts,
     rootPublishedPost: publishedPosts[0] || null,
   };
