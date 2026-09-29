@@ -19,6 +19,12 @@ This change covers:
 
 It does not change content generation, thread splitting rules, scheduler frequency, or the public retry endpoint.
 
+## Deletion Protection
+
+A content output must not be deletable after it has been scheduled for publishing, claimed by a publish run, or associated with any `published_posts` progress row. The delete service returns HTTP `409` in those cases.
+
+This guard closes the race where cron holds a content output in memory, the user deletes its database row while Threads is processing, and the later `published_posts` insert fails its `content_output_id` foreign key. The pre-publish progress row also makes the database foreign key a second line of protection.
+
 ## Existing Schema Additions
 
 The deployed database contains these additions:
@@ -56,6 +62,8 @@ publish_started_at = now
 
 After container creation, `creation_id` is written before calling `threads_publish`.
 
+Immediately before sending `threads_publish`, the row is durably changed to `uncertain`. This conservative transition ensures that a process crash or lost response can never leave a remotely attempted publish looking safely retryable. A confirmed response subsequently changes it to `success`; an explicit rejection may change it to `failed` when the API guarantees no post was created.
+
 After a confirmed publish response, the same row is updated:
 
 ```text
@@ -64,7 +72,7 @@ platform_post_id = Threads post ID
 publish_finished_at = now
 ```
 
-If Threads explicitly rejects container processing or publishing, the row becomes `failed` with `publish_error_message`.
+If Threads explicitly rejects container processing or guarantees that publishing did not create a post, the row becomes `failed` with `publish_error_message`.
 
 If the publish request may have reached Threads but the backend cannot determine whether it succeeded, the row becomes `uncertain`. An uncertain sequence must never be automatically republished.
 
@@ -202,5 +210,6 @@ Tests must cover:
 - stale jobs become failed rather than automatically republished;
 - timers are stopped on success and failure;
 - final database update errors are surfaced;
+- scheduled, claimed, processing, successful, or uncertain content outputs cannot be deleted;
 - short and long thread success paths remain sequential.
 
