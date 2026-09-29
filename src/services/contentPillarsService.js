@@ -90,11 +90,20 @@ function normalizeContentPillarPayload(payload = {}) {
     keyMessage: readOptionalText(source, ["keyMessage", "key_message"]),
     ctaDirection: readOptionalText(source, ["ctaDirection", "cta_direction"]),
     affiliateLink: readOptionalText(source, ["affiliateLink", "affiliate_link"]),
-    aiEnhancedVersion: readOptionalText(source, ["aiEnhancedVersion", "ai_enhanced_version"]),
-    userReviewEdit: readOptionalText(source, ["userReviewEdit", "user_review_edit"]),
+    threadType: readOptionalText(source, ["threadType", "thread_type"]),
     isActive: readOptionalBoolean(source, ["isActive", "is_active"]),
     sortOrder: readOptionalNumber(source, ["sortOrder", "sort_order"]),
   };
+}
+
+function assertValidThreadType(threadType) {
+  if (
+    threadType !== undefined &&
+    threadType !== null &&
+    !["short", "long"].includes(threadType)
+  ) {
+    throw createHttpError("threadType must be either short or long", 400);
+  }
 }
 
 function assertCreateContentPillarPayload(payload) {
@@ -183,8 +192,7 @@ function mapContentPillarRow(row, relations = {}) {
     keyMessage: row.key_message,
     ctaDirection: row.cta_direction,
     affiliateLink: row.affiliate_link,
-    aiEnhancedVersion: row.ai_enhanced_version,
-    userReviewEdit: row.user_review_edit,
+    threadType: row.thread_type,
     isActive: row.is_active,
     sortOrder: row.sort_order,
     createdAt: row.created_at,
@@ -314,12 +322,8 @@ function buildInsertPayload({ userId, input }) {
     payload.affiliate_link = input.affiliateLink;
   }
 
-  if (input.aiEnhancedVersion !== undefined) {
-    payload.ai_enhanced_version = input.aiEnhancedVersion;
-  }
-
-  if (input.userReviewEdit !== undefined) {
-    payload.user_review_edit = input.userReviewEdit;
+  if (input.threadType !== undefined && input.threadType !== null) {
+    payload.thread_type = input.threadType;
   }
 
   if (input.isActive !== undefined && input.isActive !== null) {
@@ -368,12 +372,8 @@ function buildUpdatePayload(input) {
     payload.affiliate_link = input.affiliateLink;
   }
 
-  if (input.aiEnhancedVersion !== undefined) {
-    payload.ai_enhanced_version = input.aiEnhancedVersion;
-  }
-
-  if (input.userReviewEdit !== undefined) {
-    payload.user_review_edit = input.userReviewEdit;
+  if (input.threadType !== undefined && input.threadType !== null) {
+    payload.thread_type = input.threadType;
   }
 
   if (input.isActive !== undefined && input.isActive !== null) {
@@ -418,7 +418,7 @@ async function assertContentPillarBelongsToUserAndPersona({
 
   const { data, error } = await supabase
     .from("content_pillars")
-    .select("id, user_id, persona_config_id, pillar_name, template_content, target_objective, audience_segment, key_message, cta_direction, affiliate_link, ai_enhanced_version, user_review_edit, is_active, sort_order, created_at, updated_at")
+    .select("id, user_id, persona_config_id, pillar_name, template_content, target_objective, audience_segment, key_message, cta_direction, affiliate_link, thread_type, is_active, sort_order, created_at, updated_at")
     .eq("id", contentPillarId)
     .eq("user_id", userId)
     .maybeSingle();
@@ -604,6 +604,7 @@ async function createContentPillar({ supabase, userId, payload }) {
 
   const input = normalizeContentPillarPayload(payload);
   assertCreateContentPillarPayload(input);
+  assertValidThreadType(input.threadType);
 
   await assertPersonaConfigBelongsToUser({
     supabase,
@@ -640,6 +641,7 @@ async function updateContentPillar({ supabase, userId, id, payload }) {
   }
 
   const input = normalizeContentPillarPayload(payload);
+  assertValidThreadType(input.threadType);
   const updatePayload = buildUpdatePayload(input);
 
   if (Object.keys(updatePayload).length === 0) {
@@ -788,6 +790,7 @@ async function enhanceContentPillarWithAi({
 
 module.exports = {
   assertContentPillarBelongsToUserAndPersona,
+  assertValidThreadType,
   createContentPillar,
   deleteContentPillar,
   enhanceContentPillarWithAi,

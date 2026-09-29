@@ -29,9 +29,9 @@ function createSumoPodClient() {
 
 async function generateChatCompletion({
   messages,
-  model = "gpt-4o-mini",
-  maxTokens = 150,
-  temperature = 0.5,
+  model = "gpt-5-mini",
+  maxTokens = 10000,
+  temperature = 0.3,
 }) {
   const openai = createSumoPodClient();
 

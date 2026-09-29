@@ -26,6 +26,7 @@ run("normalizeContentPillarPayload maps schema fields", () => {
     persona_config_id: "persona-id",
     name: "  Growth ",
     template_content: "  Template  ",
+    thread_type: "long",
     is_active: "false",
     sort_order: "3",
   });
@@ -33,8 +34,63 @@ run("normalizeContentPillarPayload maps schema fields", () => {
   assert.equal(payload.personaConfigId, "persona-id");
   assert.equal(payload.pillarName, "Growth");
   assert.equal(payload.templateContent, "Template");
+  assert.equal(payload.threadType, "long");
   assert.equal(payload.isActive, false);
   assert.equal(payload.sortOrder, 3);
+});
+
+run("normalizeContentPillarPayload ignores removed persisted fields", () => {
+  const payload = normalizeContentPillarPayload({
+    ai_enhanced_version: "legacy enhanced text",
+    user_review_edit: "legacy review text",
+  });
+
+  assert.equal(Object.hasOwn(payload, "aiEnhancedVersion"), false);
+  assert.equal(Object.hasOwn(payload, "userReviewEdit"), false);
+});
+
+run("validateCreateContentPillarRequest rejects invalid threadType", () => {
+  const req = {
+    body: {
+      personaConfigId: "persona-id",
+      pillarName: "Growth",
+      threadType: "medium",
+    },
+  };
+  let receivedError = null;
+
+  validateCreateContentPillarRequest(req, {}, (error) => {
+    receivedError = error;
+  });
+
+  assert.ok(receivedError);
+  assert.equal(receivedError.status, 400);
+  assert.equal(receivedError.message, "threadType must be either short or long");
+});
+
+run("validateUpdateContentPillarRequest accepts long threadType", () => {
+  const req = { body: { thread_type: "long" } };
+  let receivedError = null;
+
+  validateUpdateContentPillarRequest(req, {}, (error) => {
+    receivedError = error;
+  });
+
+  assert.equal(receivedError, undefined);
+  assert.equal(req.contentPillarInput.threadType, "long");
+});
+
+run("validateUpdateContentPillarRequest rejects invalid threadType", () => {
+  const req = { body: { threadType: "medium" } };
+  let receivedError = null;
+
+  validateUpdateContentPillarRequest(req, {}, (error) => {
+    receivedError = error;
+  });
+
+  assert.ok(receivedError);
+  assert.equal(receivedError.status, 400);
+  assert.equal(receivedError.message, "threadType must be either short or long");
 });
 
 run("validateEnhanceContentPillarRequest accepts FE payload shape", () => {

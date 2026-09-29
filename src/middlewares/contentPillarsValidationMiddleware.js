@@ -1,4 +1,5 @@
 const {
+  assertValidThreadType,
   normalizeContentPillarPayload,
 } = require("../services/contentPillarsService");
 
@@ -27,6 +28,8 @@ function validateCreateContentPillarRequest(req, res, next) {
       throw createHttpError("Missing required field: pillarName", 400);
     }
 
+    assertValidThreadType(contentPillarInput.threadType);
+
     req.contentPillarInput = contentPillarInput;
     next();
   } catch (error) {
@@ -37,6 +40,8 @@ function validateCreateContentPillarRequest(req, res, next) {
 function validateEnhanceContentPillarRequest(req, res, next) {
   try {
     const contentPillarInput = normalizeContentPillarPayload(req.body);
+
+    assertValidThreadType(contentPillarInput.threadType);
 
     if (!contentPillarInput.personaConfigId) {
       throw createHttpError("Missing required field: personaConfigId", 400);
@@ -56,6 +61,8 @@ function validateEnhanceContentPillarRequest(req, res, next) {
 function validateUpdateContentPillarRequest(req, res, next) {
   try {
     const contentPillarInput = normalizeContentPillarPayload(req.body);
+
+    assertValidThreadType(contentPillarInput.threadType);
 
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "name") && !contentPillarInput.pillarName) {
       throw createHttpError("Missing required field: name", 400);

@@ -377,11 +377,11 @@ function normalizeAuthResponse({ user, session, profile }) {
     profile,
     session: session
       ? {
-          accessToken: session.access_token,
-          refreshToken: session.refresh_token,
-          expiresAt: session.expires_at,
-          tokenType: session.token_type,
-        }
+        accessToken: session.access_token,
+        refreshToken: session.refresh_token,
+        expiresAt: session.expires_at,
+        tokenType: session.token_type,
+      }
       : null,
   };
 }
@@ -590,7 +590,12 @@ async function register(
     options: {
       data: {
         account_name: normalizedInput.accountName,
-        full_name: normalizedInput.fullName,
+        full_name:
+          normalizedInput.fullName ||
+          normalizedInput.accountName,
+        display_name:
+          normalizedInput.fullName ||
+          normalizedInput.accountName,
       },
     },
   });
@@ -610,9 +615,9 @@ async function register(
   const emailConfirmationRequired = !signUpData.user.email_confirmed_at;
   const profile = !emailConfirmationRequired && signUpData.session?.access_token
     ? await profileLoader({
-        userId: signUpData.user.id,
-        accessToken: signUpData.session.access_token,
-      })
+      userId: signUpData.user.id,
+      accessToken: signUpData.session.access_token,
+    })
     : null;
 
   await subscriptionEnsurer({

@@ -61,13 +61,13 @@ create table public.content_pillars (
   key_message text,
   cta_direction text,
   affiliate_link text,
-  ai_enhanced_version text,
-  user_review_edit text,
+  thread_type text not null default 'short',
   is_active boolean not null default true,
   sort_order integer not null default 0,
   created_at timestamp with time zone not null default now(),
   updated_at timestamp with time zone not null default now(),
   constraint content_pillars_pkey primary key (id),
+  constraint content_pillars_thread_type_check check (thread_type in ('short', 'long')),
   constraint content_pillars_user_id_fkey foreign key (user_id) references public.profiles(id),
   constraint content_pillars_persona_config_id_fkey foreign key (persona_config_id) references public.persona_configs(id)
 );
@@ -154,6 +154,7 @@ create table public.content_outputs (
   topic_id uuid,
   platform text default 'threads',
   format_output text,
+  thread_type text not null default 'short',
   content text not null,
   status public.content_output_status default 'draft',
   created_at timestamp with time zone default now(),
@@ -167,6 +168,7 @@ create table public.content_outputs (
   publish_scheduled_job_id uuid,
   publish_scheduled_job_run_id uuid,
   constraint content_outputs_pkey primary key (id),
+  constraint content_outputs_thread_type_check check (thread_type in ('short', 'long')),
   constraint content_outputs_user_id_fkey foreign key (user_id) references public.profiles(id),
   constraint content_outputs_persona_config_id_fkey foreign key (persona_config_id) references public.persona_configs(id),
   constraint content_outputs_topic_id_fkey foreign key (topic_id) references public.content_topics(id),
@@ -190,12 +192,18 @@ create table public.published_posts (
   error_message text,
   created_at timestamp with time zone default now(),
   parent_published_post_id uuid,
+  sequence_number integer not null default 1,
+  post_content text,
   constraint published_posts_pkey primary key (id),
+  constraint published_posts_sequence_number_check check (sequence_number >= 1),
   constraint published_posts_user_id_fkey foreign key (user_id) references public.profiles(id),
   constraint published_posts_social_account_id_fkey foreign key (social_account_id) references public.social_accounts(id),
   constraint published_posts_content_output_id_fkey foreign key (content_output_id) references public.content_outputs(id),
   constraint published_posts_parent_published_post_id_fkey foreign key (parent_published_post_id) references public.published_posts(id)
 );
+
+create unique index if not exists uq_published_posts_output_sequence
+on public.published_posts (content_output_id, sequence_number);
 
 create table public.generation_logs (
   id uuid not null default gen_random_uuid(),

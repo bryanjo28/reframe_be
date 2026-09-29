@@ -3,6 +3,7 @@ const threadsAuthService = require("./threadsAuthService");
 const scheduledJobsService = require("./scheduledJobsService");
 const {
   createScheduledJobRun,
+  parseThreadParts,
   updateScheduledJobRun,
 } = require("./contentOutputsService");
 
@@ -11,6 +12,13 @@ const THREADS_API_VERSION = "v1.0";
 const THREADS_POST_INTERVAL_MS = Math.max(
   0,
   Number.parseInt(process.env.THREADS_POST_INTERVAL_MS || "2000", 10) || 0
+);
+const THREADS_REPLY_PROCESSING_DELAY_MS = Math.max(
+  0,
+  Number.parseInt(
+    process.env.THREADS_REPLY_PROCESSING_DELAY_MS || "40000",
+    10
+  ) || 0
 );
 
 function createHttpError(message, status = 500, details) {
@@ -84,6 +92,7 @@ function mapContentOutputRow(row) {
     publishScheduledJobRunId: row.publish_scheduled_job_run_id,
     platform: row.platform,
     formatOutput: row.format_output,
+    threadType: row.thread_type || "short",
     content: row.content,
     status: row.status,
     createdAt: row.created_at,
@@ -110,6 +119,9 @@ function mapPublishedPostRow(row) {
     postedAt: row.posted_at,
     status: row.status,
     errorMessage: row.error_message,
+    parentPublishedPostId: row.parent_published_post_id,
+    sequenceNumber: row.sequence_number,
+    postContent: row.post_content,
     createdAt: row.created_at,
   };
 }
@@ -245,21 +257,33 @@ async function ensureFreshThreadsAccount({ supabase, userId }) {
   });
 }
 
-async function publishTextThread({ accessToken, threadsId, content, replyControl = "everyone" }) {
+async function publishTextThread({
+  accessToken,
+  threadsId,
+  content,
+  replyToId = null,
+  replyControl = "everyone",
+  processingDelayMs,
+  requestApi = requestThreadsApi,
+}) {
   if (!content || String(content).trim().length === 0) {
     throw createHttpError("Content is empty", 400);
   }
 
   if (String(content).length > 500) {
-    content = String(content).slice(0, 500);
+    throw createHttpError(
+      "Each Threads post must not exceed 500 characters",
+      400
+    );
   }
-  const creationResponse = await requestThreadsApi(`${threadsId}/threads`, {
+  const creationResponse = await requestApi(`${threadsId}/threads`, {
     method: "POST",
     accessToken,
     params: {
       media_type: "TEXT",
       text: content,
       reply_control: replyControl,
+      reply_to_id: replyToId,
     },
   });
 
@@ -269,7 +293,18 @@ async function publishTextThread({ accessToken, threadsId, content, replyControl
     throw createHttpError("Threads API did not return a creation id", 502, creationResponse);
   }
 
-  const publishResponse = await requestThreadsApi(`${threadsId}/threads_publish`, {
+  const resolvedProcessingDelayMs =
+    processingDelayMs === undefined
+      ? replyToId
+        ? THREADS_REPLY_PROCESSING_DELAY_MS
+        : 0
+      : Math.max(0, Number(processingDelayMs) || 0);
+
+  if (resolvedProcessingDelayMs > 0) {
+    await sleep(resolvedProcessingDelayMs);
+  }
+
+  const publishResponse = await requestApi(`${threadsId}/threads_publish`, {
     method: "POST",
     accessToken,
     params: {
@@ -285,6 +320,50 @@ async function publishTextThread({ accessToken, threadsId, content, replyControl
     platformPostId,
     rawCreationResponse: creationResponse,
     rawPublishResponse: publishResponse,
+  };
+}
+
+async function publishThreadChain({
+  accessToken,
+  threadsId,
+  content,
+  threadType = "short",
+  replyControl = "everyone",
+  publishPart = publishTextThread,
+  onPartPublished = null,
+}) {
+  const threadParts = parseThreadParts(content, threadType);
+  const publishedParts = [];
+  let previousPlatformPostId = null;
+
+  for (const [index, part] of threadParts.entries()) {
+    const replyToId = previousPlatformPostId;
+    const publishResult = await publishPart({
+      accessToken,
+      threadsId,
+      content: part,
+      replyToId,
+      replyControl,
+    });
+
+    const publishedPart = {
+      sequenceNumber: index + 1,
+      content: part,
+      replyToId,
+      ...publishResult,
+    };
+
+    if (onPartPublished) {
+      await onPartPublished(publishedPart);
+    }
+
+    publishedParts.push(publishedPart);
+    previousPlatformPostId = publishResult.platformPostId;
+  }
+
+  return {
+    rootPlatformPostId: publishedParts[0].platformPostId,
+    parts: publishedParts,
   };
 }
 
@@ -508,6 +587,9 @@ async function savePublishedPost({
   contentOutputId,
   platformPostId,
   postUrl,
+  parentPublishedPostId = null,
+  sequenceNumber = 1,
+  postContent = null,
 }) {
   const { data, error } = await supabase
     .from("published_posts")
@@ -518,6 +600,9 @@ async function savePublishedPost({
       platform: "threads",
       platform_post_id: platformPostId,
       post_url: postUrl,
+      parent_published_post_id: parentPublishedPostId,
+      sequence_number: sequenceNumber,
+      post_content: postContent,
       posted_at: new Date().toISOString(),
       status: "success",
     })
@@ -529,6 +614,51 @@ async function savePublishedPost({
   }
 
   return mapPublishedPostRow(data);
+}
+
+async function publishAndPersistThreadChain({
+  supabase,
+  userId,
+  account,
+  contentOutput,
+  publishChain = publishThreadChain,
+}) {
+  const publishedPosts = [];
+  let previousPublishedPost = null;
+
+  const chainResult = await publishChain({
+    accessToken: account.accessToken,
+    threadsId: account.threadsId,
+    content: contentOutput.content,
+    threadType: contentOutput.threadType || contentOutput.thread_type || "short",
+    onPartPublished: async (part) => {
+      const postUrl = getPublishedPostUrl({
+        username: account.accountId,
+        postId: part.platformPostId,
+        responseData: part.rawPublishResponse,
+      });
+      const publishedPost = await savePublishedPost({
+        supabase,
+        userId,
+        socialAccountId: account.id,
+        contentOutputId: contentOutput.id,
+        platformPostId: part.platformPostId,
+        postUrl,
+        parentPublishedPostId: previousPublishedPost?.id || null,
+        sequenceNumber: part.sequenceNumber,
+        postContent: part.content,
+      });
+
+      publishedPosts.push(publishedPost);
+      previousPublishedPost = publishedPost;
+    },
+  });
+
+  return {
+    ...chainResult,
+    publishedPosts,
+    rootPublishedPost: publishedPosts[0] || null,
+  };
 }
 
 async function markContentOutputFailed({ supabase, userId, contentOutputId }) {
@@ -596,33 +726,16 @@ async function publishSingleDraft({ supabase, userId, contentOutput }) {
     throw createHttpError("Content output content is empty", 400);
   }
 
-  const publishResult = await publishTextThread({
-    accessToken: account.accessToken,
-    threadsId: account.threadsId,
-    content: contentOutput.content,
+  const publication = await publishAndPersistThreadChain({
+    supabase,
+    userId,
+    account,
+    contentOutput,
   });
-
-  const postUrl = getPublishedPostUrl({
-    username: account.accountId,
-    postId: publishResult.platformPostId,
-    responseData: publishResult.rawPublishResponse,
-  });
-
-  let publishedPost = null;
+  const rootPart = publication.parts[0];
+  const publishedPost = publication.rootPublishedPost;
+  const postUrl = publishedPost?.postUrl || null;
   let warning = null;
-
-  try {
-    publishedPost = await savePublishedPost({
-      supabase,
-      userId,
-      socialAccountId: account.id,
-      contentOutputId: contentOutput.id,
-      platformPostId: publishResult.platformPostId,
-      postUrl,
-    });
-  } catch (error) {
-    warning = error.message;
-  }
 
   let contentOutputUpdate = {
     contentOutput: null,
@@ -634,7 +747,7 @@ async function publishSingleDraft({ supabase, userId, contentOutput }) {
       supabase,
       userId,
       contentOutputId: contentOutput.id,
-      platformPostId: publishResult.platformPostId,
+      platformPostId: publication.rootPlatformPostId,
     });
   } catch (error) {
     contentOutputUpdate = {
@@ -653,8 +766,9 @@ async function publishSingleDraft({ supabase, userId, contentOutput }) {
     contentOutputId: contentOutput.id,
     contentOutput: contentOutputUpdate.contentOutput || mapContentOutputRow(contentOutput),
     publishedPost,
-    creationId: publishResult.creationId,
-    platformPostId: publishResult.platformPostId,
+    publishedPosts: publication.publishedPosts,
+    creationId: rootPart.creationId,
+    platformPostId: publication.rootPlatformPostId,
     postUrl,
     warning,
   };
@@ -1007,32 +1121,20 @@ async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit 
         console.log("[runScheduledThreadsJob] publishing content_output:", claimedRow.id);
         const account = await ensureFreshThreadsAccount({ supabase, userId });
         console.log("[runScheduledThreadsJob] threads account:", { id: account.id, threadsId: account.threadsId, hasToken: !!account.accessToken });
-        const publishResult = await publishTextThread({
-          accessToken: account.accessToken,
-          threadsId: account.threadsId,
-          content: claimedRow.content,
-        });
-
-        const postUrl = getPublishedPostUrl({
-          username: account.accountId,
-          postId: publishResult.platformPostId,
-          responseData: publishResult.rawPublishResponse,
-        });
-
-        await savePublishedPost({
+        const publication = await publishAndPersistThreadChain({
           supabase,
           userId,
-          socialAccountId: account.id,
-          contentOutputId: claimedRow.id,
-          platformPostId: publishResult.platformPostId,
-          postUrl,
+          account,
+          contentOutput: claimedRow,
         });
+        const rootPart = publication.parts[0];
+        const postUrl = publication.rootPublishedPost?.postUrl || null;
 
         const { data: postedRow, error: postedUpdateError } = await supabase
           .from("content_outputs")
           .update({
             status: "posted",
-            external_post_id: publishResult.platformPostId,
+            external_post_id: publication.rootPlatformPostId,
           })
           .eq("id", claimedRow.id)
           .eq("user_id", userId)
@@ -1043,15 +1145,16 @@ async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit 
           throw createHttpError(postedUpdateError.message, 400, postedUpdateError);
         }
 
-        console.log("[runScheduledThreadsJob] published successfully:", { contentOutputId: claimedRow.id, platformPostId: publishResult.platformPostId, postUrl });
+        console.log("[runScheduledThreadsJob] published successfully:", { contentOutputId: claimedRow.id, platformPostId: publication.rootPlatformPostId, postUrl });
         jobSuccessCount += 1;
         jobResults.push({
           contentOutputId: claimedRow.id,
           status: "success",
           contentOutput: mapContentOutputRow(postedRow),
-          creationId: publishResult.creationId,
-          platformPostId: publishResult.platformPostId,
+          creationId: rootPart.creationId,
+          platformPostId: publication.rootPlatformPostId,
           postUrl,
+          publishedPosts: publication.publishedPosts,
         });
       } catch (error) {
         console.error("[runScheduledThreadsJob] publish failed for content_output:", claimedRow.id, error.message, error.details || "");
@@ -1141,5 +1244,8 @@ module.exports = {
   scheduleApprovedContentOutputs,
   runScheduledThreadsJob,
   publishTextThread,
+  publishThreadChain,
+  publishAndPersistThreadChain,
+  savePublishedPost,
   requestThreadsApi,
 };
