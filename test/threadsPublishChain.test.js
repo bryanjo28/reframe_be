@@ -157,6 +157,55 @@ async function main() {
     assert.equal(result.sequenceNumber, 2);
   });
 
+  await run("savePublishedPost maps persisted publish progress fields", async () => {
+    const row = {
+      id: "published-2",
+      user_id: "user-1",
+      social_account_id: "account-1",
+      content_output_id: "output-1",
+      platform: "threads",
+      platform_post_id: "reply-platform-id",
+      post_url: "https://threads.net/reply",
+      posted_at: "2026-09-29T08:01:00.000Z",
+      status: "success",
+      error_message: null,
+      parent_published_post_id: "published-1",
+      sequence_number: 2,
+      post_content: "Reply content",
+      created_at: "2026-09-29T08:00:00.000Z",
+      creation_id: "container-2",
+      publish_status: "success",
+      publish_error_message: null,
+      publish_started_at: "2026-09-29T08:00:30.000Z",
+      publish_finished_at: "2026-09-29T08:01:00.000Z",
+    };
+    const supabase = {
+      from(table) {
+        assert.equal(table, "published_posts");
+        return {
+          insert() { return this; },
+          select() { return this; },
+          async single() { return { data: row, error: null }; },
+        };
+      },
+    };
+
+    const result = await savePublishedPost({
+      supabase,
+      userId: "user-1",
+      socialAccountId: "account-1",
+      contentOutputId: "output-1",
+      platformPostId: "reply-platform-id",
+      postUrl: "https://threads.net/reply",
+    });
+
+    assert.equal(result.creationId, "container-2");
+    assert.equal(result.publishStatus, "success");
+    assert.equal(result.publishErrorMessage, null);
+    assert.equal(result.publishStartedAt, "2026-09-29T08:00:30.000Z");
+    assert.equal(result.publishFinishedAt, "2026-09-29T08:01:00.000Z");
+  });
+
   await run("publishAndPersistThreadChain links database rows and returns root id", async () => {
     const insertedRows = [];
     const supabase = {

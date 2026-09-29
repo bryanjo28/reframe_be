@@ -131,6 +131,11 @@ function mapPublishedPostRow(row) {
     sequenceNumber: row.sequence_number,
     postContent: row.post_content,
     createdAt: row.created_at,
+    creationId: row.creation_id,
+    publishStatus: row.publish_status,
+    publishErrorMessage: row.publish_error_message,
+    publishStartedAt: row.publish_started_at,
+    publishFinishedAt: row.publish_finished_at,
   };
 }
 
