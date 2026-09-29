@@ -18,6 +18,82 @@ async function run(name, fn) {
   }
 }
 
+const chainParts = ["Root", "Reply one", "Reply two"];
+function progressRow(sequence, overrides = {}) {
+  return {
+    id: `published-${sequence}`, user_id: "user-1", social_account_id: "account-1",
+    content_output_id: "output-1", platform: "threads", sequence_number: sequence,
+    post_content: chainParts[sequence - 1], platform_post_id: `post-${sequence}`,
+    parent_published_post_id: sequence === 1 ? null : `published-${sequence - 1}`,
+    publish_status: "success", status: "success", creation_id: `container-${sequence}`,
+    ...overrides,
+  };
+}
+
+// Keep the real progress service; replace only its database transport.
+function progressDatabase(initialRows = [], beforeWrite = async () => {}) {
+  const rows = initialRows.map((row) => ({ ...row }));
+  return {
+    rows,
+    from(table) {
+      assert.equal(table, "published_posts");
+      let action = "read";
+      let payload;
+      const filters = [];
+      const matches = (row) => filters.every(([key, value]) => row[key] === value);
+      return {
+        select() { return this; },
+        eq(key, value) { filters.push([key, value]); return this; },
+        insert(value) { action = "insert"; payload = value; return this; },
+        update(value) { action = "update"; payload = value; return this; },
+        async order() {
+          return { data: rows.filter(matches).map((row) => ({ ...row })), error: null };
+        },
+        async single() { return this.maybeSingle(); },
+        async maybeSingle() {
+          if (action !== "read") {
+            const error = await beforeWrite(payload);
+            if (error) return { data: null, error };
+          }
+          let row = rows.find(matches);
+          if (action === "insert") {
+            row = { id: `published-${rows.length + 1}`, ...payload };
+            rows.push(row);
+          } else if (action === "update" && row) Object.assign(row, payload);
+          return { data: row ? { ...row } : null, error: null };
+        },
+      };
+    },
+  };
+}
+
+function chainInput(supabase, requestApi, extra = {}) {
+  const publishPart = (input) => publishTextThread({ ...input, requestApi });
+  return {
+    supabase, userId: "user-1",
+    account: { id: "account-1", accessToken: "secret-token", threadsId: "threads-user", accountId: "username" },
+    contentOutput: { id: "output-1", content: chainParts.join("---THREAD_SPLIT---"), thread_type: "long" },
+    publishPart,
+    // Exercise either orchestration version without any live API requests.
+    publishChain: (input) => publishThreadChain({ ...input, publishPart }),
+    ...extra,
+  };
+}
+
+function successfulApi(calls) {
+  let sequence = 0;
+  return async (path, options) => {
+    calls.push({ path, options });
+    if (path === "threads-user/threads") {
+      sequence = chainParts.indexOf(options.params.text) + 1;
+      return { id: `container-${sequence}` };
+    }
+    if (path === "threads-user/threads_publish") return { id: `post-${sequence}` };
+    sequence = Number(path.split("-").at(-1));
+    return { id: path, status: "FINISHED" };
+  };
+}
+
 async function main() {
   await run("publishThreadChain publishes root and replies sequentially", async () => {
     const calls = [];
@@ -318,59 +394,147 @@ async function main() {
     assert.equal(result.publishFinishedAt, "2026-09-29T08:01:00.000Z");
   });
 
-  await run("publishAndPersistThreadChain links database rows and returns root id", async () => {
-    const insertedRows = [];
-    const supabase = {
-      from() {
-        return {
-          insert(payload) {
-            this.payload = payload;
-            return this;
-          },
-          select() {
-            return this;
-          },
-          async single() {
-            const row = {
-              id: `published-${insertedRows.length + 1}`,
-              ...this.payload,
-            };
-            insertedRows.push(row);
-            return { data: row, error: null };
-          },
-        };
-      },
-    };
-    const publishChain = async ({ onPartPublished }) => {
-      const parts = [
-        { sequenceNumber: 1, content: "Root", platformPostId: "root-id" },
-        { sequenceNumber: 2, content: "Reply", platformPostId: "reply-id" },
-      ];
-      for (const part of parts) await onPartPublished(part);
-      return { rootPlatformPostId: "root-id", parts };
-    };
+  await run("persisted successful prefix resumes only sequence 3 and returns the complete chain", async () => {
+    const db = progressDatabase([progressRow(1), progressRow(2)]);
+    const calls = [];
+    const result = await publishAndPersistThreadChain(chainInput(db, successfulApi(calls)));
+    assert.equal(calls.length, 3);
+    assert.equal(calls[0].options.params.text, "Reply two");
+    assert.equal(calls[0].options.params.reply_to_id, "post-2");
+    assert.equal(result.rootPlatformPostId, "post-1");
+    assert.equal(result.rootPublishedPost.id, "published-1");
+    assert.deepEqual(result.publishedPosts.map((row) => row.id), ["published-1", "published-2", "published-3"]);
+    assert.deepEqual(result.parts.map((part) => part.platformPostId), ["post-1", "post-2", "post-3"]);
+    assert.equal(db.rows[2].parent_published_post_id, "published-2");
+    assert.equal(db.rows[2].publish_status, "success");
+  });
 
-    const result = await publishAndPersistThreadChain({
-      supabase,
-      userId: "user-1",
-      account: {
-        id: "account-1",
-        accessToken: "token",
-        threadsId: "threads-user",
-        accountId: "username",
-      },
-      contentOutput: {
-        id: "output-1",
-        content: "Root---THREAD_SPLIT---Reply",
-        thread_type: "long",
-      },
-      publishChain,
+  await run("all-success reconciliation makes zero API calls", async () => {
+    const db = progressDatabase([progressRow(1), progressRow(2), progressRow(3)]);
+    const calls = [];
+    const result = await publishAndPersistThreadChain(chainInput(db, successfulApi(calls)));
+    assert.equal(calls.length, 0);
+    assert.equal(result.publishedPosts.length, 3);
+    assert.equal(result.parts.length, 3);
+    assert.equal(result.rootPlatformPostId, "post-1");
+  });
+
+  for (const creationId of [null, "container-1"]) {
+    await run(`processing sequence safely resumes with container ${creationId}`, async () => {
+      const db = progressDatabase([progressRow(1, { publish_status: "processing", status: "processing", platform_post_id: null, creation_id: creationId })]);
+      const calls = [];
+      await publishAndPersistThreadChain(chainInput(db, successfulApi(calls)));
+      assert.equal(calls.filter((call) => call.path === "threads-user/threads").length, creationId ? 2 : 3);
+      assert.equal(db.rows.length, 3);
+      assert.equal(db.rows[0].id, "published-1");
+      assert.equal(db.rows[0].creation_id, "container-1");
+      assert.equal(db.rows[0].publish_status, "success");
     });
+  }
 
-    assert.equal(insertedRows[0].parent_published_post_id, null);
-    assert.equal(insertedRows[1].parent_published_post_id, "published-1");
-    assert.equal(result.rootPlatformPostId, "root-id");
-    assert.equal(result.publishedPosts.length, 2);
+  await run("failed sequence with a container and no platform ID is reused", async () => {
+    const db = progressDatabase([progressRow(1, { publish_status: "failed", status: "failed", platform_post_id: null })]);
+    await publishAndPersistThreadChain(chainInput(db, successfulApi([])));
+    assert.equal(db.rows.length, 3);
+    assert.equal(db.rows[0].id, "published-1");
+    assert.equal(db.rows[0].publish_status, "success");
+  });
+
+  for (const scenario of [
+    { name: "explicit pre-publish rejection", phase: "poll", response: { status: "ERROR" }, status: "failed" },
+    { name: "publish rejection", phase: "publish", error: new Error("rejected"), status: "uncertain" },
+    { name: "publish transport failure", phase: "publish", error: new TypeError("fetch failed"), status: "uncertain" },
+    { name: "missing publish ID", phase: "publish", response: { success: true }, status: "uncertain" },
+    { name: "container ID only publish response", phase: "publish", response: { creation_id: "container-1" }, status: "uncertain" },
+  ]) {
+    await run(`${scenario.name} persists ${scenario.status} and stops the chain`, async () => {
+      const db = progressDatabase();
+      const calls = [];
+      await assert.rejects(publishAndPersistThreadChain(chainInput(db, async (path) => {
+        calls.push(path);
+        if (path === "threads-user/threads") return { id: "container-1" };
+        if (path === "container-1" && scenario.phase !== "poll") return { status: "FINISHED" };
+        if (scenario.error) throw scenario.error;
+        return scenario.response;
+      })));
+      assert.equal(db.rows.length, 1);
+      assert.equal(db.rows[0].publish_status, scenario.status);
+      assert.equal(calls.filter((path) => path === "threads-user/threads").length, 1);
+    });
+  }
+
+  await run("uncertain and invalid persisted progress stop before external calls", async () => {
+    for (const rows of [
+      [progressRow(1, { publish_status: "uncertain" })],
+      [progressRow(1, { post_content: "changed" })],
+      [progressRow(2)],
+      [progressRow(1, { publish_status: "failed" })],
+    ]) {
+      const calls = [];
+      await assert.rejects(publishAndPersistThreadChain(chainInput(progressDatabase(rows), successfulApi(calls))), { status: 409 });
+      assert.equal(calls.length, 0);
+    }
+  });
+
+  await run("lease loss before sequence 2 prevents any sequence 2 API calls", async () => {
+    const db = progressDatabase();
+    const calls = [];
+    await assert.rejects(publishAndPersistThreadChain(chainInput(db, successfulApi(calls), {
+      assertLeaseOwnership: async () => {
+        if (db.rows[0]?.publish_status === "success") throw new Error("lease lost");
+      },
+    })), { message: "lease lost" });
+    assert.equal(calls.length, 3);
+    assert.equal(db.rows[0].publish_status, "success");
+  });
+
+  await run("lease loss during polling prevents threads_publish", async () => {
+    const db = progressDatabase();
+    const calls = [];
+    let leaseLost = false;
+    const api = successfulApi(calls);
+    await assert.rejects(publishAndPersistThreadChain(chainInput(db, async (...args) => {
+      const result = await api(...args);
+      if (args[0] === "container-1") leaseLost = true;
+      return result;
+    }, {
+      assertLeaseOwnership: async () => { if (leaseLost) throw new Error("lease lost"); },
+    })), { message: "lease lost" });
+    assert.equal(calls.length, 2);
+    assert.equal(db.rows[0].publish_status, "failed");
+  });
+
+  await run("reservation, container, uncertainty and success are persisted before their dependent external calls", async () => {
+    const db = progressDatabase([], async () => { await new Promise((resolve) => setImmediate(resolve)); });
+    const calls = [];
+    const api = successfulApi(calls);
+    await publishAndPersistThreadChain(chainInput(db, async (path, options) => {
+      const row = db.rows.at(-1);
+      if (path === "threads-user/threads") {
+        assert.equal(row.publish_status, "processing");
+        assert.ok(db.rows.slice(0, -1).every((previous) => previous.publish_status === "success"));
+      } else if (path === "threads-user/threads_publish") {
+        assert.equal(row.publish_status, "uncertain");
+        assert.equal(row.creation_id, options.params.creation_id);
+      } else assert.equal(row.creation_id, path);
+      return api(path, options);
+    }));
+    assert.equal(db.rows.length, 3);
+    assert.ok(db.rows.every((row) => row.publish_status === "success"));
+  });
+
+  await run("failed success persistence leaves uncertainty and stops later posts without completion logging", async () => {
+    const db = progressDatabase([], async (payload) => payload.publish_status === "success" ? { message: "database write failed" } : null);
+    const calls = [];
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (...args) => logs.push(args);
+    try {
+      await assert.rejects(publishAndPersistThreadChain(chainInput(db, successfulApi(calls))), { message: "database write failed" });
+    } finally { console.log = originalLog; }
+    assert.equal(calls.length, 3);
+    assert.equal(db.rows[0].publish_status, "uncertain");
+    assert.ok(!logs.some(([message]) => message === "[Threads Chain] completed"));
   });
 }
 
