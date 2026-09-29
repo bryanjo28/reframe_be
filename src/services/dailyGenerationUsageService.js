@@ -87,13 +87,14 @@ async function getCurrentDailyUsage({ supabase, userId, usageKey, usageDate, now
 
 async function consumeDailyGenerationHit({
   supabase,
+  usageSupabase = supabase,
   userId,
   usageKey,
   usageDate,
   now = new Date(),
 }) {
-  if (!supabase) {
-    throw createHttpError("Supabase client is required", 500);
+  if (!usageSupabase) {
+    throw createHttpError("Supabase usage client is required", 500);
   }
 
   const normalizedUsageKey = normalizeUsageKey(usageKey);
@@ -101,7 +102,10 @@ async function consumeDailyGenerationHit({
     throw createHttpError("Missing required field: usageKey", 400);
   }
 
-  const activeSubscription = await getActiveUserSubscription({ supabase, userId });
+  const activeSubscription = await getActiveUserSubscription({
+    supabase: usageSupabase,
+    userId,
+  });
   if (!activeSubscription) {
     throw createHttpError("No active subscription found for this user", 403);
   }
@@ -125,7 +129,7 @@ async function consumeDailyGenerationHit({
   }
 
   const { usageDate: targetUsageDate, usage: currentUsage } = await getCurrentDailyUsage({
-    supabase,
+    supabase: usageSupabase,
     userId,
     usageKey: normalizedUsageKey,
     usageDate,
@@ -147,7 +151,7 @@ async function consumeDailyGenerationHit({
   }
 
   const { data, error } = currentUsage
-    ? await supabase
+    ? await usageSupabase
         .from("user_daily_usage")
         .update({
           request_count: nextHits,
@@ -156,7 +160,7 @@ async function consumeDailyGenerationHit({
         .eq("id", currentUsage.id)
         .select("id, user_id, usage_date, usage_key, request_count, created_at, updated_at")
         .single()
-    : await supabase
+    : await usageSupabase
         .from("user_daily_usage")
         .insert({
           user_id: userId,

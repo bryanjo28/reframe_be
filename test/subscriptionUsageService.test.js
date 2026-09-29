@@ -212,4 +212,35 @@ function createFakeSupabase({
     assert.equal(supabase.state.insertedPayload, null);
     assert.equal(supabase.state.updatedPayload, null);
   });
+
+  await run("consumeMonthlyAiCredits uses the privileged usage client", async () => {
+    const usageSupabase = createFakeSupabase({
+      subscriptionRow: {
+        id: "sub-1",
+        user_id: "user-123",
+        plan_id: "plan-1",
+        status: "active",
+      },
+      planRow: {
+        id: "plan-1",
+        monthly_ai_credits: 100,
+        is_active: true,
+      },
+    });
+    const userSupabase = {
+      from() {
+        throw new Error("user client must not write usage tables");
+      },
+    };
+
+    await consumeMonthlyAiCredits({
+      supabase: userSupabase,
+      usageSupabase,
+      userId: "user-123",
+      usage: { total_tokens: 12 },
+      periodMonth: "2026-06-01",
+    });
+
+    assert.equal(usageSupabase.state.insertedPayload.ai_credits_used, 12);
+  });
 })();

@@ -138,13 +138,27 @@ async function getCurrentMonthlyAiUsage({ supabase, userId, periodMonth, now = n
   };
 }
 
-async function consumeMonthlyAiCredits({ supabase, userId, usage, periodMonth, now = new Date() }) {
+async function consumeMonthlyAiCredits({
+  supabase,
+  usageSupabase = supabase,
+  userId,
+  usage,
+  periodMonth,
+  now = new Date(),
+}) {
+  if (!usageSupabase) {
+    throw createHttpError("Supabase usage client is required", 500);
+  }
+
   const creditsUsed = normalizeUsageAmount(usage);
   if (creditsUsed <= 0) {
     return null;
   }
 
-  const activeSubscription = await getActiveUserSubscription({ supabase, userId });
+  const activeSubscription = await getActiveUserSubscription({
+    supabase: usageSupabase,
+    userId,
+  });
   if (!activeSubscription) {
     throw createHttpError("No active subscription found for this user", 403);
   }
@@ -155,7 +169,7 @@ async function consumeMonthlyAiCredits({ supabase, userId, usage, periodMonth, n
   }
 
   const { periodMonth: targetPeriodMonth, usage: currentUsage } = await getCurrentMonthlyAiUsage({
-    supabase,
+    supabase: usageSupabase,
     userId,
     periodMonth,
     now,
@@ -175,7 +189,7 @@ async function consumeMonthlyAiCredits({ supabase, userId, usage, periodMonth, n
   }
 
   const recordedUsage = await recordUserAiUsage({
-    supabase,
+    supabase: usageSupabase,
     userId,
     usage,
     periodMonth: targetPeriodMonth,

@@ -1,4 +1,4 @@
-const { isSupabaseConfigured } = require("../config/supabase");
+const { isSupabaseConfigured, supabaseAdmin } = require("../config/supabase");
 const sumopodService = require("./sumopodService");
 const { consumeMonthlyAiCredits } = require("./subscriptionUsageService");
 
@@ -772,6 +772,7 @@ async function enhanceContentPillarWithAi({
 
   const subscriptionUsage = await consumeMonthlyAiCredits({
     supabase,
+    usageSupabase: supabaseAdmin,
     userId,
     usage: result.raw?.usage || null,
   });

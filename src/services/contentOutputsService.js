@@ -1,4 +1,4 @@
-const { isSupabaseConfigured } = require("../config/supabase");
+const { isSupabaseConfigured, supabaseAdmin } = require("../config/supabase");
 const promptTemplatesService = require("./promptTemplatesService");
 const scheduledJobsService = require("./scheduledJobsService");
 const sumopodService = require("./sumopodService");
@@ -1174,6 +1174,7 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
 
     const dailyUsage = await consumeDailyGenerationHit({
       supabase,
+      usageSupabase: supabaseAdmin,
       userId,
       usageKey: "generate_content",
     });
@@ -1206,6 +1207,7 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
 
     const aiUsage = await consumeMonthlyAiCredits({
       supabase,
+      usageSupabase: supabaseAdmin,
       userId,
       usage: aiResult.raw?.usage || null,
     });
@@ -1698,6 +1700,7 @@ async function generateContentOutputDemo({ supabase, userId, payload }) {
 
   const aiUsage = await consumeMonthlyAiCredits({
     supabase,
+    usageSupabase: supabaseAdmin,
     userId,
     usage: aiResult.raw?.usage || null,
   });
