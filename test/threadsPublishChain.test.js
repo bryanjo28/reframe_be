@@ -118,6 +118,118 @@ async function main() {
     assert.equal(result.platformPostId, "reply-id");
   });
 
+  await run("publishTextThread awaits lifecycle callbacks at the API boundaries", async () => {
+    const events = [];
+    const creationResponse = { id: "container-1" };
+    const result = await publishTextThread({
+      accessToken: "token",
+      threadsId: "threads-user",
+      content: "Post text",
+      onContainerCreated: async (event) => {
+        assert.deepEqual(event, {
+          creationId: "container-1",
+          rawCreationResponse: creationResponse,
+        });
+        await Promise.resolve();
+        events.push("container persisted");
+      },
+      onPublishStarted: async (event) => {
+        assert.deepEqual(event, { creationId: "container-1" });
+        await Promise.resolve();
+        events.push("publish started persisted");
+      },
+      requestApi: async (path) => {
+        if (path === "threads-user/threads") {
+          events.push("container API response");
+          return creationResponse;
+        }
+        if (path === "container-1") {
+          events.push("polling");
+          return { id: "container-1", status: "FINISHED" };
+        }
+        assert.equal(path, "threads-user/threads_publish");
+        events.push("publish API request");
+        return { id: "post-1" };
+      },
+    });
+
+    events.push("confirmed post ID");
+    assert.deepEqual(events, [
+      "container API response",
+      "container persisted",
+      "polling",
+      "publish started persisted",
+      "publish API request",
+      "confirmed post ID",
+    ]);
+    assert.equal(result.platformPostId, "post-1");
+  });
+
+  await run("publishTextThread stops before polling when container callback rejects", async () => {
+    const paths = [];
+    await assert.rejects(
+      publishTextThread({
+        accessToken: "token",
+        threadsId: "threads-user",
+        content: "Post text",
+        onContainerCreated: async () => {
+          throw new Error("container persistence failed");
+        },
+        requestApi: async (path) => {
+          paths.push(path);
+          return path === "container-1"
+            ? { id: "container-1", status: "FINISHED" }
+            : { id: "container-1" };
+        },
+      }),
+      { message: "container persistence failed" }
+    );
+    assert.deepEqual(paths, ["threads-user/threads"]);
+  });
+
+  await run("publishTextThread stops before publishing when publish callback rejects", async () => {
+    const paths = [];
+    await assert.rejects(
+      publishTextThread({
+        accessToken: "token",
+        threadsId: "threads-user",
+        content: "Post text",
+        onPublishStarted: async () => {
+          throw new Error("publish state persistence failed");
+        },
+        requestApi: async (path) => {
+          paths.push(path);
+          return path === "container-1"
+            ? { id: "container-1", status: "FINISHED" }
+            : { id: "container-1" };
+        },
+      }),
+      { message: "publish state persistence failed" }
+    );
+    assert.deepEqual(paths, ["threads-user/threads", "container-1"]);
+  });
+
+  await run("publishTextThread rejects publish responses without a platform post ID", async () => {
+    const responses = [
+      { id: "container-1" },
+      { id: "container-1", status: "FINISHED" },
+      { success: true },
+    ];
+    await assert.rejects(
+      publishTextThread({
+        accessToken: "token",
+        threadsId: "threads-user",
+        content: "Post text",
+        requestApi: async () => responses.shift(),
+      }),
+      (error) => {
+        assert.equal(error.status, 502);
+        assert.match(error.message, /post id/i);
+        return true;
+      }
+    );
+  });
+
   await run("savePublishedPost persists sequence, content, and internal parent id", async () => {
     let insertedPayload = null;
     const supabase = {

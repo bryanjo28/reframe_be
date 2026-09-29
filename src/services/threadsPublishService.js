@@ -391,6 +391,8 @@ async function publishTextThread({
   replyToId = null,
   replyControl = "everyone",
   requestApi = requestThreadsApi,
+  onContainerCreated,
+  onPublishStarted,
   pollIntervalMs = THREADS_CONTAINER_POLL_INTERVAL_MS,
   maxWaitMs = THREADS_CONTAINER_MAX_WAIT_MS,
   sleepFn = sleep,
@@ -423,6 +425,10 @@ async function publishTextThread({
     throw createHttpError("Threads API did not return a creation id", 502, creationResponse);
   }
 
+  if (onContainerCreated) {
+    await onContainerCreated({ creationId, rawCreationResponse: creationResponse });
+  }
+
   await waitForThreadsContainerReady({
     accessToken,
     creationId,
@@ -433,6 +439,10 @@ async function publishTextThread({
     nowFn,
   });
 
+  if (onPublishStarted) {
+    await onPublishStarted({ creationId });
+  }
+
   const publishResponse = await requestApi(`${threadsId}/threads_publish`, {
     method: "POST",
     accessToken,
@@ -442,7 +452,11 @@ async function publishTextThread({
   });
 
   const platformPostId =
-    publishResponse?.id || publishResponse?.post_id || publishResponse?.creation_id || creationId;
+    publishResponse?.id || publishResponse?.post_id || publishResponse?.creation_id;
+
+  if (!platformPostId) {
+    throw createHttpError("Threads API did not return a post id", 502, publishResponse);
+  }
 
   return {
     creationId,
