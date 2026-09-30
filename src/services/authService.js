@@ -7,7 +7,7 @@
   supabaseAdmin,
 } = require("../config/supabase");
 
-function createHttpError(message, status = 500, details, code) {
+function createHttpError(message, status = 500, details, code = "AUTH_SERVICE_ERROR") {
   const error = new Error(message);
   error.status = status;
 
@@ -34,8 +34,17 @@ function createRegistrationError(error) {
     );
   }
 
+  if (Number(error?.status) === 429 || error?.code === "over_request_rate_limit") {
+    return createHttpError(
+      "Terlalu banyak percobaan, silakan coba lagi nanti",
+      429,
+      error,
+      "AUTH_RATE_LIMIT_EXCEEDED"
+    );
+  }
+
   return createHttpError(
-    error?.message || "Registration failed",
+    "Registration failed",
     Number.isInteger(Number(error?.status)) &&
       Number(error.status) >= 400 &&
       Number(error.status) <= 599
@@ -117,7 +126,12 @@ function assertRequiredAuthFields(payload, fields) {
   });
 
   if (missingFields.length > 0) {
-    throw createHttpError(`Missing required fields: ${missingFields.join(", ")}`, 400);
+    throw createHttpError(
+      `Missing required fields: ${missingFields.join(", ")}`,
+      400,
+      undefined,
+      "VALIDATION_ERROR"
+    );
   }
 }
 
@@ -332,15 +346,30 @@ function assertValidPasswordChangePayload(payload) {
   }
 
   if (missingFields.length > 0) {
-    throw createHttpError(`Missing required fields: ${missingFields.join(", ")}`, 400);
+    throw createHttpError(
+      `Missing required fields: ${missingFields.join(", ")}`,
+      400,
+      undefined,
+      "VALIDATION_ERROR"
+    );
   }
 
   if (String(payload.newPassword) !== String(payload.confirmPassword)) {
-    throw createHttpError("newPassword and confirmPassword do not match", 400);
+    throw createHttpError(
+      "newPassword and confirmPassword do not match",
+      400,
+      undefined,
+      "PASSWORD_MISMATCH"
+    );
   }
 
   if (String(payload.newPassword).length < 8) {
-    throw createHttpError("newPassword must be at least 8 characters", 400);
+    throw createHttpError(
+      "newPassword must be at least 8 characters",
+      400,
+      undefined,
+      "PASSWORD_TOO_SHORT"
+    );
   }
 }
 
@@ -356,15 +385,30 @@ function assertValidPasswordResetPayload(payload) {
   }
 
   if (missingFields.length > 0) {
-    throw createHttpError(`Missing required fields: ${missingFields.join(", ")}`, 400);
+    throw createHttpError(
+      `Missing required fields: ${missingFields.join(", ")}`,
+      400,
+      undefined,
+      "VALIDATION_ERROR"
+    );
   }
 
   if (String(payload.newPassword) !== String(payload.confirmPassword)) {
-    throw createHttpError("newPassword and confirmPassword do not match", 400);
+    throw createHttpError(
+      "newPassword and confirmPassword do not match",
+      400,
+      undefined,
+      "PASSWORD_MISMATCH"
+    );
   }
 
   if (String(payload.newPassword).length < 8) {
-    throw createHttpError("newPassword must be at least 8 characters", 400);
+    throw createHttpError(
+      "newPassword must be at least 8 characters",
+      400,
+      undefined,
+      "PASSWORD_TOO_SHORT"
+    );
   }
 }
 
@@ -711,7 +755,21 @@ async function login({ email, password }, dependencies = {}) {
       );
     }
 
-    throw createHttpError(error.message, 400, error);
+    if (Number(error.status) === 429 || error.code === "over_request_rate_limit") {
+      throw createHttpError(
+        "Terlalu banyak percobaan, silakan coba lagi nanti",
+        429,
+        error,
+        "AUTH_RATE_LIMIT_EXCEEDED"
+      );
+    }
+
+    throw createHttpError(
+      "Email atau password salah",
+      401,
+      error,
+      "INVALID_CREDENTIALS"
+    );
   }
 
   assertEmailConfirmed(data.user);
@@ -854,7 +912,12 @@ async function changePassword({ user, supabase, currentPassword, newPassword, co
   });
 
   if (reauthError) {
-    throw createHttpError("Current password is wrong", 400, reauthError);
+    throw createHttpError(
+      "Current password is wrong",
+      401,
+      reauthError,
+      "CURRENT_PASSWORD_INVALID"
+    );
   }
 
   const { data, error } = await supabase.auth.updateUser({

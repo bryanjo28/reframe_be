@@ -4,12 +4,16 @@ const {
   recordUserAiUsage,
 } = require("./userUsageService");
 
-function createHttpError(message, status = 500, details) {
+function createHttpError(message, status = 500, details, code) {
   const error = new Error(message);
   error.status = status;
 
   if (details) {
     error.details = details;
+  }
+
+  if (code) {
+    error.code = code;
   }
 
   return error;
@@ -179,13 +183,18 @@ async function consumeMonthlyAiCredits({
   const nextTotal = currentCreditsUsed + creditsUsed;
 
   if (nextTotal > monthlyLimit) {
-    throw createHttpError("Monthly AI credits exceeded", 402, {
-      monthlyAiCredits: monthlyLimit,
-      aiCreditsUsed: currentCreditsUsed,
-      requestedCredits: creditsUsed,
-      remainingCredits: Math.max(0, monthlyLimit - currentCreditsUsed),
-      periodMonth: targetPeriodMonth,
-    });
+    throw createHttpError(
+      "Monthly AI credits exceeded",
+      429,
+      {
+        monthlyAiCredits: monthlyLimit,
+        aiCreditsUsed: currentCreditsUsed,
+        requestedCredits: creditsUsed,
+        remainingCredits: Math.max(0, monthlyLimit - currentCreditsUsed),
+        periodMonth: targetPeriodMonth,
+      },
+      "MONTHLY_AI_CREDITS_EXCEEDED"
+    );
   }
 
   const recordedUsage = await recordUserAiUsage({

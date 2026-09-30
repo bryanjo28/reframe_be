@@ -20,6 +20,7 @@ async function authMiddleware(req, res, next) {
     if (!accessToken) {
       return res.status(401).json({
         success: false,
+        error_code: "UNAUTHORIZED",
         message: "Unauthorized",
       });
     }
@@ -29,6 +30,7 @@ async function authMiddleware(req, res, next) {
     if (!user) {
       return res.status(401).json({
         success: false,
+        error_code: "INVALID_ACCESS_TOKEN",
         message: "Invalid or expired token",
       });
     }

@@ -1,6 +1,7 @@
 require("dotenv").config();
 
 require("./authValidation.test");
+require("./authMiddleware.test");
 require("./contentOutputsValidation.test");
 require("./contentOutputsPrompt.test");
 require("./contentPillarsValidation.test");
@@ -20,4 +21,5 @@ require("./scheduledJobProgress.test");
 require("./userUsageService.test");
 require("./subscriptionUsageService.test");
 require("./dailyGenerationUsageService.test");
+require("./errorHandler.test");
 require("./cronService.test");

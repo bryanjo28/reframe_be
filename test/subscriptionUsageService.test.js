@@ -207,7 +207,8 @@ function createFakeSupabase({
     }
 
     assert.ok(receivedError);
-    assert.equal(receivedError.status, 402);
+    assert.equal(receivedError.status, 429);
+    assert.equal(receivedError.code, "MONTHLY_AI_CREDITS_EXCEEDED");
     assert.equal(receivedError.message, "Monthly AI credits exceeded");
     assert.equal(supabase.state.insertedPayload, null);
     assert.equal(supabase.state.updatedPayload, null);

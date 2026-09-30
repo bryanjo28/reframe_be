@@ -6,30 +6,18 @@ const {
   validateLoginRequest,
   validateForgotPasswordRequest,
   validateRegisterRequest,
+  validateRegistrationEnabled,
   validateResendVerificationRequest,
 } = require("../middlewares/authValidationMiddleware");
 
 const router = express.Router();
 
-const isRegistrationEnabled = String(process.env.AUTH_ENABLE_REGISTRATION || "")
-  .trim()
-  .toLowerCase();
-
-router.post("/register", (req, res, next) => {
-  const enabled =
-    isRegistrationEnabled === "true" ||
-    isRegistrationEnabled === "1" ||
-    isRegistrationEnabled === "yes";
-
-  if (!enabled) {
-    return res.status(403).json({
-      success: false,
-      message: "Registration is disabled",
-    });
-  }
-
-  return validateRegisterRequest(req, res, () => authController.register(req, res, next));
-});
+router.post(
+  "/register",
+  validateRegistrationEnabled,
+  validateRegisterRequest,
+  authController.register
+);
 
 router.post("/login", validateLoginRequest, authController.login);
 router.post(

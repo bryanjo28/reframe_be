@@ -183,7 +183,8 @@ function createFakeSupabase({ subscriptionRow, planRow, dailyUsageRow = null }) 
     }
 
     assert.ok(receivedError);
-    assert.equal(receivedError.status, 402);
+    assert.equal(receivedError.status, 429);
+    assert.equal(receivedError.code, "DAILY_GENERATION_LIMIT_EXCEEDED");
     assert.equal(receivedError.message, "Daily generation limit exceeded");
     assert.equal(supabase.state.insertedPayload, null);
   });

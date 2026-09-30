@@ -1,11 +1,15 @@
 const { getActiveUserSubscription } = require("./subscriptionUsageService");
 
-function createHttpError(message, status = 500, details) {
+function createHttpError(message, status = 500, details, code) {
   const error = new Error(message);
   error.status = status;
 
   if (details) {
     error.details = details;
+  }
+
+  if (code) {
+    error.code = code;
   }
 
   return error;
@@ -140,14 +144,19 @@ async function consumeDailyGenerationHit({
   const nextHits = currentHits + 1;
 
   if (nextHits > dailyLimit) {
-    throw createHttpError("Daily generation limit exceeded", 402, {
-      dailyLimit,
-      currentHits,
-      requestedHits: 1,
-      remainingHits: Math.max(0, dailyLimit - currentHits),
-      usageKey: normalizedUsageKey,
-      usageDate: targetUsageDate,
-    });
+    throw createHttpError(
+      "Daily generation limit exceeded",
+      429,
+      {
+        dailyLimit,
+        currentHits,
+        requestedHits: 1,
+        remainingHits: Math.max(0, dailyLimit - currentHits),
+        usageKey: normalizedUsageKey,
+        usageDate: targetUsageDate,
+      },
+      "DAILY_GENERATION_LIMIT_EXCEEDED"
+    );
   }
 
   const { data, error } = currentUsage

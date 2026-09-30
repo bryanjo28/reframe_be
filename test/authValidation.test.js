@@ -7,6 +7,7 @@ const {
 const {
   validateLoginRequest,
   validateRegisterRequest,
+  validateRegistrationEnabled,
 } = require("../src/middlewares/authValidationMiddleware");
 
 function run(name, fn) {
@@ -89,7 +90,45 @@ run("validateLoginRequest rejects empty credentials", () => {
 
   assert.ok(receivedError);
   assert.equal(receivedError.status, 400);
+  assert.equal(receivedError.code, "VALIDATION_ERROR");
   assert.equal(receivedError.message, "Missing required fields: email, password");
+});
+
+run("validateRegistrationEnabled returns the standard disabled response", () => {
+  const previousValue = process.env.AUTH_ENABLE_REGISTRATION;
+  process.env.AUTH_ENABLE_REGISTRATION = "false";
+
+  let statusCode = null;
+  let responseBody = null;
+  const response = {
+    status(value) {
+      statusCode = value;
+      return this;
+    },
+    json(value) {
+      responseBody = value;
+      return this;
+    },
+  };
+
+  try {
+    validateRegistrationEnabled({}, response, () => {
+      throw new Error("next must not be called");
+    });
+  } finally {
+    if (previousValue === undefined) {
+      delete process.env.AUTH_ENABLE_REGISTRATION;
+    } else {
+      process.env.AUTH_ENABLE_REGISTRATION = previousValue;
+    }
+  }
+
+  assert.equal(statusCode, 403);
+  assert.deepEqual(responseBody, {
+    success: false,
+    error_code: "REGISTRATION_DISABLED",
+    message: "Registration is disabled",
+  });
 });
 
 if (process.exitCode) {

@@ -150,6 +150,35 @@ async function main() {
     assert.equal(profileLoaded, false);
   });
 
+  await run("login maps invalid credentials to a stable API error", async () => {
+    const authClient = {
+      auth: {
+        async signInWithPassword() {
+          return {
+            data: { user: null, session: null },
+            error: {
+              code: "invalid_credentials",
+              message: "Invalid login credentials",
+              status: 400,
+            },
+          };
+        },
+      },
+    };
+
+    await assert.rejects(
+      authService.login(
+        { email: "user@example.com", password: "wrong-password" },
+        { authClient }
+      ),
+      {
+        status: 401,
+        code: "INVALID_CREDENTIALS",
+        message: "Email atau password salah",
+      }
+    );
+  });
+
   await run("buildRegistrationResponse hides session until email is confirmed", async () => {
     const result = authService.buildRegistrationResponse({
       user: {
@@ -231,7 +260,7 @@ async function main() {
     assert.equal(alternateError.code, "EMAIL_ALREADY_EXISTS");
   });
 
-  await run("createRegistrationError preserves a valid upstream status", async () => {
+  await run("createRegistrationError maps provider rate limits to a stable error", async () => {
     const error = authService.createRegistrationError({
       message: "Too many requests",
       code: "over_request_rate_limit",
@@ -239,7 +268,8 @@ async function main() {
     });
 
     assert.equal(error.status, 429);
-    assert.equal(error.code, "REGISTRATION_FAILED");
+    assert.equal(error.code, "AUTH_RATE_LIMIT_EXCEEDED");
+    assert.equal(error.message, "Terlalu banyak percobaan, silakan coba lagi nanti");
   });
 
   await run("resolveRegistrationError translates a signup race into an account-name conflict", async () => {
@@ -312,12 +342,12 @@ async function main() {
         "unrelated-name",
         adminClient
       ),
-      { status: 429, code: "REGISTRATION_FAILED" }
+      { status: 429, code: "AUTH_RATE_LIMIT_EXCEEDED" }
     );
     assert.equal(lookupCalled, false);
   });
 
-  await run("errorHandler exposes a stable application error code", async () => {
+  await run("errorHandler exposes a stable application error_code", async () => {
     let statusCode = null;
     let responseBody = null;
     const response = {
@@ -347,7 +377,7 @@ async function main() {
     }
 
     assert.equal(statusCode, 409);
-    assert.equal(responseBody.code, "ACCOUNT_NAME_ALREADY_EXISTS");
+    assert.equal(responseBody.error_code, "ACCOUNT_NAME_ALREADY_EXISTS");
     assert.equal(responseBody.message, "Account name is already registered");
   });
 
@@ -419,7 +449,11 @@ async function main() {
         newPassword: "new-password",
         confirmPassword: "different-password",
       }),
-      { message: "newPassword and confirmPassword do not match", status: 400 }
+      {
+        message: "newPassword and confirmPassword do not match",
+        status: 400,
+        code: "PASSWORD_MISMATCH",
+      }
     );
     assert.equal(updateCalled, false);
   });
