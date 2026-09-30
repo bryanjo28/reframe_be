@@ -10,6 +10,7 @@ require("./personaConfigsValidation.test");
 require("./authService.test");
 require("./authSubscriptionAssignment.test");
 require("./threadsAccountsValidation.test");
+require("./threadsAccountsService.test");
 require("./threadsAuthService.test");
 require("./threadsPublishValidation.test");
 require("./threadsPublishChain.test");

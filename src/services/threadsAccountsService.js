@@ -1,11 +1,15 @@
 const { isSupabaseConfigured } = require("../config/supabase");
 
-function createHttpError(message, status = 500, details) {
+function createHttpError(message, status = 500, details, code) {
   const error = new Error(message);
   error.status = status;
 
   if (details) {
     error.details = details;
+  }
+
+  if (code) {
+    error.code = code;
   }
 
   return error;
@@ -185,7 +189,12 @@ async function getThreadsAccount({ supabase, userId }) {
     .maybeSingle();
 
   if (error) {
-    throw createHttpError(error.message, 500, error);
+    throw createHttpError(
+      "Failed to load Threads account",
+      500,
+      error,
+      "THREADS_SERVICE_ERROR"
+    );
   }
 
   return mapThreadsAccountRow(data);
@@ -194,15 +203,22 @@ async function getThreadsAccount({ supabase, userId }) {
 async function disconnectThreadsAccount({ supabase, userId }) {
   if (!isSupabaseConfigured || !supabase) {
     throw createHttpError(
-      "Supabase is not configured. Fill SUPABASE_URL and SUPABASE_ANON_KEY first.",
-      500
+      "Threads service is not configured",
+      500,
+      undefined,
+      "THREADS_SERVICE_ERROR"
     );
   }
 
   const existingAccount = await getThreadsAccount({ supabase, userId });
 
   if (!existingAccount) {
-    throw createHttpError("Threads account not found", 404);
+    throw createHttpError(
+      "Threads account not found",
+      404,
+      undefined,
+      "THREADS_ACCOUNT_NOT_FOUND"
+    );
   }
 
   const { data, error } = await supabase
@@ -218,7 +234,12 @@ async function disconnectThreadsAccount({ supabase, userId }) {
     .maybeSingle();
 
   if (error) {
-    throw createHttpError(error.message, 400, error);
+    throw createHttpError(
+      "Failed to disconnect Threads account",
+      400,
+      error,
+      "THREADS_DISCONNECT_FAILED"
+    );
   }
 
   return mapThreadsAccountRow(data);
