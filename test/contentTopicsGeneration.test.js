@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 
 const {
+  buildTopicGenerationPrompt,
   normalizeGenerateContentTopicsPayload,
 } = require("../src/services/contentTopicsGenerationService");
 const {
@@ -51,4 +52,31 @@ run("validateGenerateContentTopicsRequest rejects jumlahTopics outside range", (
   assert.ok(receivedError);
   assert.equal(receivedError.status, 400);
   assert.equal(receivedError.message, "jumlahTopics must be between 1 and 10");
+});
+
+run("buildTopicGenerationPrompt tells the model to avoid recent pillar topics", () => {
+  const prompt = buildTopicGenerationPrompt({
+    contentPillar: { pillarName: "Personal Branding" },
+    personaConfig: { targetAudience: "Content creator pemula" },
+    jumlahTopics: 3,
+    recentTopics: [
+      "Cara membangun personal branding",
+      "Kesalahan pemula saat membuat konten",
+    ],
+  });
+
+  assert.match(prompt, /1\. Cara membangun personal branding/);
+  assert.match(prompt, /2\. Kesalahan pemula saat membuat konten/);
+  assert.match(prompt, /termasuk dengan sinonim/i);
+  assert.match(prompt, /berbeda secara substansi/i);
+});
+
+run("buildTopicGenerationPrompt handles pillars without previous topics", () => {
+  const prompt = buildTopicGenerationPrompt({
+    contentPillar: { pillarName: "Personal Branding" },
+    personaConfig: {},
+    jumlahTopics: 3,
+  });
+
+  assert.match(prompt, /Belum ada topik sebelumnya/);
 });

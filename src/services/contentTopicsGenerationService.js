@@ -4,6 +4,8 @@ const { createGenerationTopicLog } = require("./generationTopicLogsService");
 const { consumeDailyGenerationHit } = require("./dailyGenerationUsageService");
 const { consumeMonthlyAiCredits } = require("./subscriptionUsageService");
 
+const RECENT_TOPICS_LIMIT = 5;
+
 function createHttpError(message, status = 500, details) {
   const error = new Error(message);
   error.status = status;
@@ -178,7 +180,42 @@ async function getOwnedContentPillarWithPersona({ supabase, userId, contentPilla
   };
 }
 
-function buildTopicGenerationPrompt({ contentPillar, personaConfig, templateText, jumlahTopics }) {
+async function getRecentTopicsForPillar({ supabase, userId, contentPillarId }) {
+  const { data, error } = await supabase
+    .from("content_topics")
+    .select("topic")
+    .eq("user_id", userId)
+    .eq("content_pillar_id", contentPillarId)
+    .order("created_at", { ascending: false })
+    .limit(RECENT_TOPICS_LIMIT);
+
+  if (error) {
+    throw createHttpError(error.message, 500, error);
+  }
+
+  const seen = new Set();
+
+  return (data || []).reduce((topics, row) => {
+    const topic = String(row?.topic || "").trim();
+    const normalizedTopic = topic.toLocaleLowerCase("id-ID");
+
+    if (!topic || seen.has(normalizedTopic)) {
+      return topics;
+    }
+
+    seen.add(normalizedTopic);
+    topics.push(topic);
+    return topics;
+  }, []);
+}
+
+function buildTopicGenerationPrompt({
+  contentPillar,
+  personaConfig,
+  templateText,
+  jumlahTopics,
+  recentTopics = [],
+}) {
   const promptTemplateText =
     templateText ||
     contentPillar?.templateContent ||
@@ -213,6 +250,11 @@ function buildTopicGenerationPrompt({ contentPillar, personaConfig, templateText
     `- platform: ${personaConfig?.platform || "-"}`,
     `- format_output: ${personaConfig?.formatOutput || "-"}`,
     "",
+    "Topik terbaru dari content pillar ini yang harus dihindari:",
+    ...(recentTopics.length > 0
+      ? recentTopics.map((topic, index) => `${index + 1}. ${topic}`)
+      : ["- Belum ada topik sebelumnya."]),
+    "",
     "Aturan:",
     "1. title harus berupa ide topic utama.",
     "2. angle harus menjelaskan sudut pandang topic.",
@@ -220,6 +262,8 @@ function buildTopicGenerationPrompt({ contentPillar, personaConfig, templateText
     "4. category_type boleh berupa educational, storytelling, opinion, tutorial, atau analisis.",
     "5. why_it_works harus singkat dan spesifik.",
     "6. topics harus berjumlah sesuai permintaan dan unik.",
+    "7. Jangan mengulang topik terbaru di atas, termasuk dengan sinonim atau judul yang hanya diubah susunan katanya.",
+    "8. Setiap topic harus berbeda secara substansi: gunakan pain point, tujuan, atau angle yang berbeda.",
   ].join("\n");
 }
 
@@ -300,11 +344,18 @@ async function generateContentTopics({ supabase, userId, payload }) {
     contentPillarId: input.contentPillarId,
   });
 
+  const recentTopics = await getRecentTopicsForPillar({
+    supabase,
+    userId,
+    contentPillarId: input.contentPillarId,
+  });
+
   const prompt = buildTopicGenerationPrompt({
     contentPillar,
     personaConfig,
     templateText: input.templateText,
     jumlahTopics: input.jumlahTopics,
+    recentTopics,
   });
   const systemPrompt = buildSystemPrompt();
 
@@ -414,6 +465,7 @@ async function generateContentTopics({ supabase, userId, payload }) {
 }
 
 module.exports = {
+  buildTopicGenerationPrompt,
   generateContentTopics,
   normalizeGenerateContentTopicsPayload,
   parseGeneratedTopicsContent,
