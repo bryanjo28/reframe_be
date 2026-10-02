@@ -62,7 +62,10 @@ async function generateContentOutput(req, res, next) {
     });
 
     res.status(201).json({
-      contents: data?.contentOutput?.content ? [data.contentOutput.content] : [],
+      contents: (data?.contentOutputs || [])
+        .map((contentOutput) => contentOutput?.content)
+        .filter(Boolean),
+      data: data?.contentOutputs || [],
     });
   } catch (error) {
     next(error);

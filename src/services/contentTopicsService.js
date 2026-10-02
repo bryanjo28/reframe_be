@@ -45,7 +45,6 @@ function normalizeContentTopicPayload(payload = {}) {
     personaConfigId: readOptionalText(source, ["personaConfigId", "persona_config_id"]),
     contentPillarId: readOptionalText(source, ["contentPillarId", "content_pillar_id"]),
     category: readOptionalText(source, ["category"]),
-    subcategory: readOptionalText(source, ["subcategory"]),
     topic: readOptionalText(source, ["topic"]),
     usedAt: readOptionalText(source, ["usedAt", "used_at"]),
   };
@@ -72,7 +71,6 @@ function mapContentTopicRow(row) {
     personaConfigId: row.persona_config_id,
     contentPillarId: row.content_pillar_id,
     category: row.category,
-    subcategory: row.subcategory,
     topic: row.topic,
     usedAt: row.used_at,
     createdAt: row.created_at,
@@ -91,10 +89,6 @@ function buildInsertPayload({ userId, input }) {
 
   if (input.category !== undefined) {
     payload.category = input.category;
-  }
-
-  if (input.subcategory !== undefined) {
-    payload.subcategory = input.subcategory;
   }
 
   if (input.topic !== undefined) {
@@ -121,10 +115,6 @@ function buildUpdatePayload(input) {
 
   if (input.category !== undefined) {
     payload.category = input.category;
-  }
-
-  if (input.subcategory !== undefined) {
-    payload.subcategory = input.subcategory;
   }
 
   if (input.topic !== undefined) {

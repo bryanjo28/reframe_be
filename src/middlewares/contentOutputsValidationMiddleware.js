@@ -44,6 +44,16 @@ function validateGenerateContentOutputRequest(req, res, next) {
       throw createHttpError("Missing required field: topicId", 400);
     }
 
+    if (contentOutputInput.variantCount !== undefined && contentOutputInput.variantCount !== null) {
+      if (!Number.isInteger(contentOutputInput.variantCount)) {
+        throw createHttpError("variantCount must be an integer", 400);
+      }
+
+      if (contentOutputInput.variantCount < 1 || contentOutputInput.variantCount > 5) {
+        throw createHttpError("variantCount must be between 1 and 5", 400);
+      }
+    }
+
     req.contentOutputInput = contentOutputInput;
     next();
   } catch (error) {

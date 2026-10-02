@@ -46,6 +46,26 @@ run("long thread prompt limits every post in the reply chain to 450 characters",
   assert.match(prompt, /---THREAD_SPLIT---/);
 });
 
+run("content output prompt includes variant context and optional instruction", () => {
+  const prompt = buildContentOutputUserPrompt({
+    persona: {},
+    topic: { topic: "Product launch" },
+    contentPillar: { threadType: "short" },
+    promptTemplate: null,
+    promptContext: {
+      variantCount: 3,
+      variantIndex: 2,
+      additionalPrompt: "Gunakan sudut pandang founder",
+    },
+    sourceContentOutput: null,
+  });
+
+  assert.match(prompt, /variant 2 dari 3/i);
+  assert.match(prompt, /angle, hook/i);
+  assert.match(prompt, /kontra-intuitif/i);
+  assert.match(prompt, /Gunakan sudut pandang founder/);
+});
+
 run("content output mapping exposes the persisted thread type", () => {
   const result = mapContentOutputRow({
     id: "output-1",

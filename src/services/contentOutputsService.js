@@ -138,6 +138,8 @@ function normalizeContentOutputPayload(payload = {}) {
     scheduledAt: readOptionalText(source, ["scheduledAt", "scheduled_at"]),
     externalPostId: readOptionalText(source, ["externalPostId", "external_post_id"]),
     retryCount: readOptionalNumber(source, ["retryCount", "retry_count"]),
+    variantCount: readOptionalNumber(source, ["variantCount", "variant_count"]),
+    variantIndex: readOptionalNumber(source, ["variantIndex", "variant_index"]),
     additionalPrompt: readOptionalText(source, ["additionalPrompt", "additional_prompt"]),
     improvementHint: readOptionalText(source, ["improvementHint", "improvement_hint"]),
     regenerate: readOptionalBoolean(source, ["regenerate"]),
@@ -533,6 +535,16 @@ function buildContentOutputUserPrompt({
           "2. Seluruh output maksimal 450 karakter termasuk spasi.",
           "3. Jangan membuat reply lanjutan.",
         ];
+  const variantCount = promptContext.variantCount || 1;
+  const variantIndex = promptContext.variantIndex || 1;
+  const variantDirections = [
+    "edukatif dan langsung ke inti",
+    "kontra-intuitif atau membantah asumsi umum",
+    "storytelling dari pengalaman nyata",
+    "praktis dengan langkah yang bisa segera dicoba",
+    "pertanyaan tajam yang memancing diskusi",
+  ];
+  const variantDirection = variantDirections[(variantIndex - 1) % variantDirections.length];
 
   const lines = [
     "Buat satu content output final yang siap dipakai.",
@@ -567,6 +579,13 @@ function buildContentOutputUserPrompt({
     "",
     "Output requirements:",
     `- Thread type: ${threadType}`,
+    variantCount > 1
+      ? `- Ini variant ${variantIndex} dari ${variantCount}. Gunakan angle, hook, dan susunan kalimat yang berbeda dari variant lainnya.`
+      : "",
+    variantCount > 1 ? `- Pendekatan khusus variant ini: ${variantDirection}.` : "",
+    promptContext.additionalPrompt
+      ? `- Instruksi tambahan dari user: ${promptContext.additionalPrompt}`
+      : "",
     ...threadRequirements,
     "- Kalau cocok, buat hook yang kuat di awal.",
     "- Jangan bertele-tele.",
@@ -621,7 +640,7 @@ async function assertTopicBelongsToUserAndPersona({
 
   const { data, error } = await supabase
     .from("content_topics")
-    .select("id, persona_config_id, content_pillar_id, category, subcategory, topic, used_at")
+    .select("id, persona_config_id, content_pillar_id, category, topic, used_at")
     .eq("id", topicId)
     .eq("user_id", userId)
     .maybeSingle();
@@ -649,7 +668,7 @@ async function getTopicWithOptionalContentPillar({
   const { data, error } = await supabase
     .from("content_topics")
     .select(
-      "id, user_id, persona_config_id, content_pillar_id, category, subcategory, topic, used_at, created_at"
+      "id, user_id, persona_config_id, content_pillar_id, category, topic, used_at, created_at"
     )
     .eq("id", topicId)
     .eq("user_id", userId)
@@ -762,7 +781,7 @@ async function listUnusedTopicsForAutoGeneration({ supabase, userId, contentPill
   const { data, error } = await supabase
     .from("content_topics")
     .select(
-      "id, user_id, persona_config_id, content_pillar_id, category, subcategory, topic, used_at, created_at"
+      "id, user_id, persona_config_id, content_pillar_id, category, topic, used_at, created_at"
     )
     .eq("user_id", userId)
     .eq("content_pillar_id", contentPillarId)
@@ -780,7 +799,6 @@ async function listUnusedTopicsForAutoGeneration({ supabase, userId, contentPill
     persona_config_id: row.persona_config_id,
     content_pillar_id: row.content_pillar_id,
     category: row.category,
-    subcategory: row.subcategory,
     topic: row.topic,
     used_at: row.used_at,
     created_at: row.created_at,
@@ -795,7 +813,7 @@ async function listTopicsByIdsForAutoGeneration({ supabase, userId, contentPilla
   const { data, error } = await supabase
     .from("content_topics")
     .select(
-      "id, user_id, persona_config_id, content_pillar_id, category, subcategory, topic, used_at, created_at"
+      "id, user_id, persona_config_id, content_pillar_id, category, topic, used_at, created_at"
     )
     .eq("user_id", userId)
     .eq("content_pillar_id", contentPillarId)
@@ -816,7 +834,6 @@ async function listTopicsByIdsForAutoGeneration({ supabase, userId, contentPilla
       persona_config_id: row.persona_config_id,
       content_pillar_id: row.content_pillar_id,
       category: row.category,
-      subcategory: row.subcategory,
       topic: row.topic,
       used_at: row.used_at,
       created_at: row.created_at,
@@ -959,9 +976,10 @@ function buildPromptContext({ persona, topic, contentPillar, sourceContentOutput
     pillarAffiliateLink: contentPillar?.affiliateLink || "",
     threadType: contentPillar?.threadType || "short",
     category: topic?.category || "",
-    subcategory: topic?.subcategory || "",
     topic: topic?.topic || "",
     platform: input.platform || persona?.platform || "threads",
+    variantCount: input.variantCount || 1,
+    variantIndex: input.variantIndex || 1,
     additionalPrompt: input.additionalPrompt || "",
     improvementHint: input.improvementHint || "",
     previousContent: sourceContentOutput?.content || "",
@@ -1332,18 +1350,45 @@ async function generateContentOutput({ supabase, userId, payload }) {
     throw createHttpError("Missing required field: topicId", 400);
   }
 
+  const variantCount = input.variantCount === undefined || input.variantCount === null
+    ? 1
+    : input.variantCount;
+
+  if (!Number.isInteger(variantCount)) {
+    throw createHttpError("variantCount must be an integer", 400);
+  }
+
+  if (variantCount < 1 || variantCount > 5) {
+    throw createHttpError("variantCount must be between 1 and 5", 400);
+  }
+
   const topic = await getTopicWithOptionalContentPillar({
     supabase,
     userId,
     topicId: input.topicId,
   });
 
-  return generateContentOutputForTopic({
-    supabase,
-    userId,
-    input,
-    topic,
-  });
+  const results = [];
+
+  for (let variantIndex = 1; variantIndex <= variantCount; variantIndex += 1) {
+    const result = await generateContentOutputForTopic({
+      supabase,
+      userId,
+      input: {
+        ...input,
+        variantCount,
+        variantIndex,
+      },
+      topic,
+    });
+    results.push(result);
+  }
+
+  return {
+    contentOutput: results[0]?.contentOutput || null,
+    contentOutputs: results.map((result) => result.contentOutput),
+    generationLogs: results.map((result) => result.generationLog),
+  };
 }
 
 async function autoGenerateContentOutputs({ supabase, userId, payload }) {

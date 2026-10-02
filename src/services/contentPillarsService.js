@@ -147,7 +147,6 @@ function mapContentTopic(row) {
     personaConfigId: row.persona_config_id,
     contentPillarId: row.content_pillar_id,
     category: row.category,
-    subcategory: row.subcategory,
     topic: row.topic,
     usedAt: row.used_at,
     createdAt: row.created_at,
@@ -460,7 +459,7 @@ async function getContentPillarRelations({ supabase, userId, contentPillarId }) 
       .maybeSingle(),
     supabase
       .from("content_topics")
-      .select("id, user_id, persona_config_id, content_pillar_id, category, subcategory, topic, used_at, created_at")
+      .select("id, user_id, persona_config_id, content_pillar_id, category, topic, used_at, created_at")
       .eq("content_pillar_id", contentPillarId)
       .eq("user_id", userId)
       .order("created_at", { ascending: false }),
