@@ -131,7 +131,6 @@ function mapPersonaConfig(row) {
     tone: row.tone,
     goal: row.goal,
     platform: row.platform,
-    formatOutput: row.format_output,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -167,7 +166,6 @@ function mapContentOutput(row) {
     contentPillarId: row.content_pillar_id,
     topicId: row.topic_id,
     platform: row.platform,
-    formatOutput: row.format_output,
     content: row.content,
     status: row.status,
     retryCount: row.retry_count,
@@ -239,7 +237,6 @@ function buildContentPillarEnhancementPrompt(contentPillar, personaConfig = null
     `- Kenapa Harus Follow: ${personaConfig?.kenapaHarusFollow || "-"}`,
     `- Gaya Komunikasi: ${personaConfig?.gayaKomunikasi || "-"}`,
     `- Platform: ${personaConfig?.platform || "-"}`,
-    `- Format Output: ${personaConfig?.formatOutput || "-"}`,
     `- Gaya Hook: ${personaConfig?.gayaHook || "-"}`,
     `- Seberapa Personal: ${personaConfig?.seberapaPersonal || "-"}`,
     `- CTA Style: ${personaConfig?.ctaStyle || "-"}`,
@@ -390,7 +387,7 @@ function buildUpdatePayload(input) {
 async function assertPersonaConfigBelongsToUser({ supabase, userId, personaConfigId }) {
   const { data, error } = await supabase
     .from("persona_configs")
-    .select("id, persona, target_audience, niche_topic_focus, content_style, tone, goal, platform, format_output")
+    .select("id, persona, target_audience, niche_topic_focus, content_style, tone, goal, platform")
     .eq("id", personaConfigId)
     .eq("user_id", userId)
     .maybeSingle();
@@ -457,7 +454,7 @@ async function getContentPillarRelations({ supabase, userId, contentPillarId }) 
   const [personaConfigResult, topicsResult, outputsResult] = await Promise.all([
     supabase
       .from("persona_configs")
-      .select("id, user_id, persona, target_audience, niche_topic_focus, content_style, tone, goal, platform, format_output, created_at, updated_at")
+      .select("id, user_id, persona, target_audience, niche_topic_focus, content_style, tone, goal, platform, created_at, updated_at")
       .eq("id", pillarData.persona_config_id)
       .eq("user_id", userId)
       .maybeSingle(),
@@ -469,7 +466,7 @@ async function getContentPillarRelations({ supabase, userId, contentPillarId }) 
       .order("created_at", { ascending: false }),
     supabase
       .from("content_outputs")
-      .select("id, user_id, persona_config_id, content_pillar_id, topic_id, platform, format_output, content, status, retry_count, created_at, updated_at")
+      .select("id, user_id, persona_config_id, content_pillar_id, topic_id, platform, content, status, retry_count, created_at, updated_at")
       .eq("content_pillar_id", contentPillarId)
       .eq("user_id", userId)
       .order("created_at", { ascending: false }),
@@ -522,7 +519,7 @@ async function listContentPillars({ supabase, userId }) {
     rows.map(async (row) => {
       const { data: personaConfigData, error: personaConfigError } = await supabase
         .from("persona_configs")
-        .select("id, user_id, persona, target_audience, niche_topic_focus, content_style, tone, goal, platform, format_output, created_at, updated_at")
+        .select("id, user_id, persona, target_audience, niche_topic_focus, content_style, tone, goal, platform, created_at, updated_at")
         .eq("id", row.persona_config_id)
         .eq("user_id", userId)
         .maybeSingle();

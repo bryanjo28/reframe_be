@@ -107,7 +107,6 @@ function mapContentOutputRow(row) {
     publishScheduledJobId: row.publish_scheduled_job_id,
     publishScheduledJobRunId: row.publish_scheduled_job_run_id,
     platform: row.platform,
-    formatOutput: row.format_output,
     threadType: row.thread_type || "short",
     content: row.content,
     status: row.status,

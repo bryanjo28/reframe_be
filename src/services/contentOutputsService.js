@@ -132,7 +132,6 @@ function normalizeContentOutputPayload(payload = {}) {
     ),
     promptTemplateId: readOptionalText(source, ["promptTemplateId", "prompt_template_id"]),
     platform: readOptionalText(source, ["platform"]),
-    formatOutput: readOptionalText(source, ["formatOutput", "format_output"]),
     threadType: readOptionalText(source, ["threadType", "thread_type"]),
     content: readOptionalText(source, ["content"]),
     status: readOptionalText(source, ["status"]),
@@ -167,7 +166,6 @@ function normalizeGenerateContentOutputDemoPayload(payload = {}) {
     targetAudience: readOptionalText(source, ["targetAudience", "target_audience"]),
     nicheTopicFocus: readOptionalText(source, ["nicheTopicFocus", "niche_topic_focus"]),
     contentStyle: readOptionalText(source, ["contentStyle", "content_style"]),
-    formatOutput: readOptionalText(source, ["formatOutput", "format_output"]) || "threads pendek",
   };
 }
 
@@ -242,7 +240,6 @@ function mapContentOutputRow(row) {
     publishScheduledJobId: row.publish_scheduled_job_id,
     publishScheduledJobRunId: row.publish_scheduled_job_run_id,
     platform: row.platform,
-    formatOutput: row.format_output,
     threadType: row.thread_type || "short",
     content: row.content,
     status: row.status,
@@ -288,10 +285,6 @@ function buildInsertPayload({ userId, input }) {
 
   if (input.platform !== undefined) {
     payload.platform = input.platform;
-  }
-
-  if (input.formatOutput !== undefined) {
-    payload.format_output = input.formatOutput;
   }
 
   if (input.status !== undefined) {
@@ -352,7 +345,6 @@ function buildDefaultDraft({
   topic,
   contentPillar,
   platform,
-  formatOutput,
   additionalPrompt,
   improvementHint,
 }) {
@@ -366,7 +358,7 @@ function buildDefaultDraft({
   const hint = improvementHint ? ` Fokus perbaikan: ${improvementHint}.` : "";
 
   return [
-    `Buat konten ${platform || "threads"} dalam format ${formatOutput || "single post"}.`,
+    `Buat konten untuk platform ${platform || "threads"}.`,
     `Persona: ${personaName}.`,
     `Content pillar: ${pillarName}.`,
     `Objective: ${pillarObjective}.`,
@@ -396,7 +388,6 @@ function buildContentOutputDemoPrompt({ persona, targetAudience, nicheTopicFocus
     `- target_audience: ${targetAudience || "-"}`,
     `- niche_topic_focus: ${nicheTopicFocus || "-"}`,
     `- content_style: ${contentStyle || "-"}`,
-    `- format_output: threads pendek`,
     "",
     "Buat 3 opsi thread terbaik yang siap dipakai sebagai draft.",
   ].join("\n");
@@ -417,7 +408,6 @@ function mapPersonaConfigDraftRow(row) {
     tone: row.tone,
     goal: row.goal,
     platform: row.platform,
-    formatOutput: row.format_output,
     isActive: row.is_active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -431,7 +421,6 @@ async function saveDemoPersonaConfig({ supabase, userId, input }) {
     niche_topic_focus: input.nicheTopicFocus,
     content_style: input.contentStyle,
     platform: "Threads",
-    format_output: input.formatOutput || "threads pendek",
     is_active: true,
   };
 
@@ -604,7 +593,7 @@ function logContentOutputGenerationDebug(label, payload) {
 async function assertPersonaConfigBelongsToUser({ supabase, userId, personaConfigId }) {
   const { data, error } = await supabase
     .from("persona_configs")
-    .select("id, persona, target_audience, niche_topic_focus, content_style, tone, goal, platform, format_output")
+    .select("id, persona, target_audience, niche_topic_focus, content_style, tone, goal, platform")
     .eq("id", personaConfigId)
     .eq("user_id", userId)
     .maybeSingle();
@@ -973,7 +962,6 @@ function buildPromptContext({ persona, topic, contentPillar, sourceContentOutput
     subcategory: topic?.subcategory || "",
     topic: topic?.topic || "",
     platform: input.platform || persona?.platform || "threads",
-    formatOutput: input.formatOutput || persona?.format_output || "single post",
     additionalPrompt: input.additionalPrompt || "",
     improvementHint: input.improvementHint || "",
     previousContent: sourceContentOutput?.content || "",
@@ -1194,7 +1182,6 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
       topic,
       contentPillar,
       platform: workingInput.platform || promptContext.platform,
-      formatOutput: workingInput.formatOutput || promptContext.formatOutput,
       additionalPrompt: workingInput.additionalPrompt,
       improvementHint: workingInput.improvementHint,
     });
@@ -1222,7 +1209,6 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
         contentPillarId: contentPillar?.id || workingInput.contentPillarId || topic?.content_pillar_id || null,
         topicId: topic.id,
         platform: workingInput.platform || promptContext.platform || "threads",
-        formatOutput: workingInput.formatOutput || promptContext.formatOutput || null,
         threadType: resolveContentOutputThreadType(contentPillar, workingInput),
         content: generatedContent,
         status: workingInput.status || "draft",
@@ -1554,7 +1540,6 @@ function mapAutoGenerateResultForResponse(result) {
       contentPillarId: result.contentOutput.contentPillarId,
       personaConfigId: result.contentOutput.personaConfigId,
       platform: result.contentOutput.platform,
-      formatOutput: result.contentOutput.formatOutput,
       status: result.contentOutput.status,
       scheduledAt: result.contentOutput.scheduledAt,
       content: result.contentOutput.content,
@@ -1743,7 +1728,6 @@ async function generateContentOutputDemo({ supabase, userId, payload }) {
       targetAudience: input.targetAudience,
       nicheTopicFocus: input.nicheTopicFocus,
       contentStyle: input.contentStyle,
-      formatOutput: input.formatOutput,
       maxThreads: 3,
     },
     personaConfig: savedPersonaConfig,

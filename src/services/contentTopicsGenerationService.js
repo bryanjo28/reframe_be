@@ -109,7 +109,6 @@ function mapPersonaConfigRow(row) {
     tone: row.tone,
     goal: row.goal,
     platform: row.platform,
-    formatOutput: row.format_output,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -160,7 +159,7 @@ async function getOwnedContentPillarWithPersona({ supabase, userId, contentPilla
   const { data: personaConfigData, error: personaConfigError } = await supabase
     .from("persona_configs")
     .select(
-      "id, user_id, persona, target_audience, niche_topic_focus, content_style, tone, goal, platform, format_output, created_at, updated_at"
+      "id, user_id, persona, target_audience, niche_topic_focus, content_style, tone, goal, platform, created_at, updated_at"
     )
     .eq("id", contentPillarData.persona_config_id)
     .eq("user_id", userId)
@@ -248,7 +247,6 @@ function buildTopicGenerationPrompt({
     `- tone: ${personaConfig?.tone || "-"}`,
     `- goal: ${personaConfig?.goal || "-"}`,
     `- platform: ${personaConfig?.platform || "-"}`,
-    `- format_output: ${personaConfig?.formatOutput || "-"}`,
     "",
     "Topik terbaru dari content pillar ini yang harus dihindari:",
     ...(recentTopics.length > 0

@@ -72,7 +72,6 @@ function normalizePersonaConfigPayload(payload = {}) {
     tone: readOptionalText(source, ["tone"]),
     goal: readOptionalText(source, ["goal"]),
     platform: readOptionalText(source, ["platform"]),
-    formatOutput: readOptionalText(source, ["formatOutput", "format_output"]),
     isActive: readOptionalBoolean(source, ["isActive", "is_active"]),
   };
 }
@@ -92,7 +91,6 @@ function mapPersonaConfigRow(row) {
     tone: row.tone,
     goal: row.goal,
     platform: row.platform,
-    formatOutput: row.format_output,
     isActive: row.is_active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -109,7 +107,6 @@ function buildInsertPayload({ userId, input }) {
   if (input.tone !== undefined) payload.tone = input.tone;
   if (input.goal !== undefined) payload.goal = input.goal;
   if (input.platform !== undefined) payload.platform = input.platform;
-  if (input.formatOutput !== undefined) payload.format_output = input.formatOutput;
   if (input.isActive !== undefined && input.isActive !== null) payload.is_active = input.isActive;
 
   return payload;
@@ -125,7 +122,6 @@ function buildUpdatePayload(input) {
   if (input.tone !== undefined) payload.tone = input.tone;
   if (input.goal !== undefined) payload.goal = input.goal;
   if (input.platform !== undefined) payload.platform = input.platform;
-  if (input.formatOutput !== undefined) payload.format_output = input.formatOutput;
   if (input.isActive !== undefined && input.isActive !== null) payload.is_active = input.isActive;
 
   return payload;
