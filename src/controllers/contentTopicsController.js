@@ -3,15 +3,17 @@ const contentTopicsGenerationService = require("../services/contentTopicsGenerat
 
 async function listContentTopics(req, res, next) {
   try {
-    const data = await contentTopicsService.listContentTopics({
+    const result = await contentTopicsService.listContentTopics({
       supabase: req.supabase,
       userId: req.user.id,
+      query: req.query,
     });
 
     res.status(200).json({
       success: true,
       message: "Content topics fetched successfully",
-      data,
+      data: result.data,
+      pagination: result.pagination,
     });
   } catch (error) {
     next(error);

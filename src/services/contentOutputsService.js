@@ -6,6 +6,11 @@ const { createGenerationLog } = require("./generationLogsService");
 const { consumeDailyGenerationHit } = require("./dailyGenerationUsageService");
 const { consumeMonthlyAiCredits } = require("./subscriptionUsageService");
 const {
+  applyPagination,
+  buildPaginationMetadata,
+  normalizePagination,
+} = require("../utils/pagination");
+const {
   assertContentPillarBelongsToUserAndPersona,
 } = require("./contentPillarsService");
 
@@ -1008,7 +1013,7 @@ function resolvePromptTemplate(promptTemplate, context) {
   };
 }
 
-async function listContentOutputs({ supabase, userId }) {
+async function listContentOutputs({ supabase, userId, query = {} }) {
   if (!isSupabaseConfigured || !supabase) {
     throw createHttpError(
       "Supabase is not configured. Fill SUPABASE_URL and SUPABASE_ANON_KEY first.",
@@ -1016,17 +1021,26 @@ async function listContentOutputs({ supabase, userId }) {
     );
   }
 
-  const { data, error } = await supabase
+  const pagination = normalizePagination(query);
+  const databaseQuery = supabase
     .from("content_outputs")
-    .select("*")
+    .select("*", { count: "exact" })
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
+  const { data, count, error } = await applyPagination(databaseQuery, pagination);
 
   if (error) {
     throw createHttpError(error.message, 500, error);
   }
 
-  return (data || []).map(mapContentOutputRow);
+  return {
+    data: (data || []).map(mapContentOutputRow),
+    pagination: buildPaginationMetadata({
+      page: pagination.page,
+      limit: pagination.limit,
+      total: count,
+    }),
+  };
 }
 
 async function getContentOutputById({ supabase, userId, id }) {

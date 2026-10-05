@@ -24,3 +24,5 @@ require("./subscriptionUsageService.test");
 require("./dailyGenerationUsageService.test");
 require("./errorHandler.test");
 require("./cronService.test");
+require("./pagination.test");
+require("./listPagination.test");

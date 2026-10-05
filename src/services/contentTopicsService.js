@@ -2,6 +2,11 @@ const { isSupabaseConfigured } = require("../config/supabase");
 const {
   assertContentPillarBelongsToUserAndPersona,
 } = require("./contentPillarsService");
+const {
+  applyPagination,
+  buildPaginationMetadata,
+  normalizePagination,
+} = require("../utils/pagination");
 
 function createHttpError(message, status = 500, details) {
   const error = new Error(message);
@@ -145,7 +150,7 @@ async function assertPersonaConfigBelongsToUser({ supabase, userId, personaConfi
   }
 }
 
-async function listContentTopics({ supabase, userId }) {
+async function listContentTopics({ supabase, userId, query = {} }) {
   if (!isSupabaseConfigured || !supabase) {
     throw createHttpError(
       "Supabase is not configured. Fill SUPABASE_URL and SUPABASE_ANON_KEY first.",
@@ -153,17 +158,26 @@ async function listContentTopics({ supabase, userId }) {
     );
   }
 
-  const { data, error } = await supabase
+  const pagination = normalizePagination(query);
+  const databaseQuery = supabase
     .from("content_topics")
-    .select("*")
+    .select("*", { count: "exact" })
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
+  const { data, count, error } = await applyPagination(databaseQuery, pagination);
 
   if (error) {
     throw createHttpError(error.message, 500, error);
   }
 
-  return (data || []).map(mapContentTopicRow);
+  return {
+    data: (data || []).map(mapContentTopicRow),
+    pagination: buildPaginationMetadata({
+      page: pagination.page,
+      limit: pagination.limit,
+      total: count,
+    }),
+  };
 }
 
 async function getContentTopicById({ supabase, userId, id }) {

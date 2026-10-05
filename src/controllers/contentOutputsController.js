@@ -2,15 +2,17 @@
 
 async function listContentOutputs(req, res, next) {
   try {
-    const data = await contentOutputsService.listContentOutputs({
+    const result = await contentOutputsService.listContentOutputs({
       supabase: req.supabase,
       userId: req.user.id,
+      query: req.query,
     });
 
     res.status(200).json({
       success: true,
       message: "Content outputs fetched successfully",
-      data,
+      data: result.data,
+      pagination: result.pagination,
     });
   } catch (error) {
     next(error);
