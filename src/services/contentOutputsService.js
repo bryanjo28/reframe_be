@@ -782,6 +782,29 @@ async function markTopicsAsUsed({ supabase, userId, topicIds = [] }) {
   return data || [];
 }
 
+async function releaseFailedTopicsForRetry({ supabase, userId, results = [] }) {
+  const failedTopicIds = results
+    .filter((result) => result?.status === "failed" && result?.topicId)
+    .map((result) => result.topicId);
+
+  if (failedTopicIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from("content_topics")
+    .update({ used_at: null })
+    .in("id", failedTopicIds)
+    .eq("user_id", userId)
+    .select("id");
+
+  if (error) {
+    throw createHttpError(error.message, 400, error);
+  }
+
+  return (data || []).map((row) => row.id);
+}
+
 async function listUnusedTopicsForAutoGeneration({ supabase, userId, contentPillarId, targetCount }) {
   const { data, error } = await supabase
     .from("content_topics")
@@ -897,6 +920,24 @@ async function createScheduledJobRun({ supabase, userId, payload }) {
   }
 
   return mapScheduledJobRunRow(data);
+}
+
+async function claimScheduledContentGenerationJob({ supabase, userId, scheduledJobId }) {
+  const { data, error } = await supabase
+    .from("scheduled_jobs")
+    .update({ status: "running" })
+    .eq("id", scheduledJobId)
+    .eq("user_id", userId)
+    .eq("job_type", "content_auto_generate")
+    .eq("status", "active")
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw createHttpError(error.message, 400, error);
+  }
+
+  return data || null;
 }
 
 async function updateScheduledJobRun({ supabase, userId, id, payload }) {
@@ -1504,6 +1545,12 @@ async function autoGenerateContentOutputs({ supabase, userId, payload }) {
         status: "failed",
         error: error.message,
       });
+      console.error("[content-outputs.auto-generate] topic failed", {
+        scheduledJobId: input.scheduledJobId || null,
+        scheduledJobRunId: scheduledJobRun?.id || null,
+        topicId: topic.id,
+        error: error.message,
+      });
     }
 
     if (scheduledJobRun) {
@@ -1523,15 +1570,26 @@ async function autoGenerateContentOutputs({ supabase, userId, payload }) {
     }
   }
 
+  let releasedTopicIds = [];
+  if (input.scheduledJobId && failedCount > 0) {
+    releasedTopicIds = await releaseFailedTopicsForRetry({
+      supabase,
+      userId,
+      results,
+    });
+  }
+
   const finishedAt = new Date().toISOString();
   const summary = {
     requestedCount,
     availableCount: topics.length,
     successCount,
     failedCount,
+    releasedTopicIds,
     scheduledAt,
   };
   const responseResults = results.map(mapAutoGenerateResultForResponse);
+  const outcome = buildAutoGenerationOutcome({ successCount, failedCount, results });
 
   if (scheduledJobRun) {
     const updatedRun = await updateScheduledJobRun({
@@ -1539,7 +1597,7 @@ async function autoGenerateContentOutputs({ supabase, userId, payload }) {
       userId,
       id: scheduledJobRun.id,
       payload: {
-        status: failedCount > 0 ? "completed_with_errors" : "completed",
+        status: outcome.status,
         targetCount: requestedCount,
         fetchedCount: topics.length,
         processedCount: results.length,
@@ -1549,6 +1607,7 @@ async function autoGenerateContentOutputs({ supabase, userId, payload }) {
           summary,
           results: responseResults,
         },
+        errorMessage: outcome.errorMessage,
         finishedAt,
       },
     });
@@ -1558,17 +1617,21 @@ async function autoGenerateContentOutputs({ supabase, userId, payload }) {
       .update({
         last_run_at: finishedAt,
         next_run_at: null,
-        last_run_status: failedCount > 0 ? "completed_with_errors" : "completed",
+        last_run_status: outcome.status,
         last_run_generated_count: successCount,
-        last_run_error: failedCount > 0 ? "One or more topics failed during auto generation" : null,
-        error_message: failedCount > 0 ? "One or more topics failed during auto generation" : null,
+        last_run_error: outcome.errorMessage,
+        error_message: outcome.errorMessage,
         status: "completed",
       })
       .eq("id", input.scheduledJobId)
       .eq("user_id", userId);
 
     return {
-      success: true,
+      success: outcome.success,
+      status: outcome.status,
+      errorMessage: outcome.errorMessage,
+      errors: outcome.errors,
+      releasedTopicIds,
       summary,
       results: responseResults,
       scheduledJobRun: updatedRun || scheduledJobRun,
@@ -1577,7 +1640,11 @@ async function autoGenerateContentOutputs({ supabase, userId, payload }) {
   }
 
   return {
-    success: true,
+    success: outcome.success,
+    status: outcome.status,
+    errorMessage: outcome.errorMessage,
+    errors: outcome.errors,
+    releasedTopicIds,
     summary,
     results: responseResults,
     scheduledJobRun: null,
@@ -1605,6 +1672,22 @@ function mapAutoGenerateResultForResponse(result) {
       createdAt: result.contentOutput.createdAt,
       updatedAt: result.contentOutput.updatedAt,
     },
+  };
+}
+
+function buildAutoGenerationOutcome({ successCount = 0, failedCount = 0, results = [] }) {
+  const errors = results
+    .filter((result) => result?.status === "failed" && result?.error)
+    .map((result) => String(result.error));
+  const hasErrors = failedCount > 0;
+
+  return {
+    success: !hasErrors,
+    status: hasErrors ? "completed_with_errors" : "completed",
+    errorMessage: hasErrors
+      ? errors[0] || "One or more topics failed during auto generation"
+      : null,
+    errors,
   };
 }
 
@@ -1874,8 +1957,10 @@ async function deleteContentOutput({ supabase, userId, id }) {
 }
 
 module.exports = {
+  buildAutoGenerationOutcome,
   buildContentOutputInsertPayload: buildInsertPayload,
   buildContentOutputUserPrompt,
+  claimScheduledContentGenerationJob,
   createContentOutput,
   createScheduledJobRun,
   deleteContentOutput,
@@ -1890,6 +1975,7 @@ module.exports = {
   normalizeContentOutputPayload,
   normalizeGenerateContentOutputDemoPayload,
   parseThreadParts,
+  releaseFailedTopicsForRetry,
   resolveContentOutputThreadType,
   updateContentOutput,
   updateScheduledJobRun,

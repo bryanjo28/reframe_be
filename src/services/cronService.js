@@ -1,17 +1,25 @@
 const cron = require("node-cron");
 const { supabaseAdmin, isSupabaseAdminConfigured } = require("../config/supabase");
 const { runScheduledThreadsJob } = require("./threadsPublishService");
-const { autoGenerateContentOutputs } = require("./contentOutputsService");
+const {
+  autoGenerateContentOutputs,
+  claimScheduledContentGenerationJob,
+} = require("./contentOutputsService");
 
-async function runDueScheduledJobs() {
-  if (!isSupabaseAdminConfigured || !supabaseAdmin) {
+async function runDueScheduledJobs({
+  isConfigured = isSupabaseAdminConfigured,
+  supabase = supabaseAdmin,
+  claimContentGenerationJob = claimScheduledContentGenerationJob,
+  generateContentOutputs = autoGenerateContentOutputs,
+} = {}) {
+  if (!isConfigured || !supabase) {
     console.warn("[cron] Supabase admin not configured, skipping job run");
     return;
   }
 
   const nowIso = new Date().toISOString();
 
-  const { data: dueJobs, error } = await supabaseAdmin
+  const { data: dueJobs, error } = await supabase
     .from("scheduled_jobs")
     .select("id, user_id, job_type, config, target_count, schedule_value")
     .eq("status", "active")
@@ -32,7 +40,7 @@ async function runDueScheduledJobs() {
     try {
       if (job.job_type === "threads_auto_post") {
         const result = await runScheduledThreadsJob({
-          supabase: supabaseAdmin,
+          supabase,
           userId: job.user_id,
           scheduledJobId: job.id,
           force: true,
@@ -48,9 +56,22 @@ async function runDueScheduledJobs() {
       }
 
       if (job.job_type === "content_auto_generate") {
+        const claimedJob = await claimContentGenerationJob({
+          supabase,
+          userId: job.user_id,
+          scheduledJobId: job.id,
+        });
+
+        if (!claimedJob) {
+          console.log(
+            `[cron] Job ${job.id} for user ${job.user_id} skipped; it was already claimed or no longer active`
+          );
+          continue;
+        }
+
         const config = job.config && typeof job.config === "object" ? job.config : {};
-        await autoGenerateContentOutputs({
-          supabase: supabaseAdmin,
+        const generationResult = await generateContentOutputs({
+          supabase,
           userId: job.user_id,
           payload: {
             personaConfigId: config.personaConfigId,
@@ -61,14 +82,27 @@ async function runDueScheduledJobs() {
             scheduledJobId: job.id,
           },
         });
-        console.log(`[cron] Job ${job.id} for user ${job.user_id} completed`);
+        const jobStatus = generationResult.status || "completed";
+        const logPayload = {
+          successCount: generationResult.summary?.successCount || 0,
+          failedCount: generationResult.summary?.failedCount || 0,
+          errors: generationResult.errors || [],
+        };
+        if (jobStatus === "completed_with_errors") {
+          console.warn(
+            `[cron] Job ${job.id} for user ${job.user_id} completed_with_errors`,
+            logPayload
+          );
+        } else {
+          console.log(`[cron] Job ${job.id} for user ${job.user_id} completed`, logPayload);
+        }
         continue;
       }
 
       console.warn(`[cron] Unsupported job type ${job.job_type} for job ${job.id}`);
     } catch (err) {
       console.error(`[cron] Job ${job.id} for user ${job.user_id} failed:`, err.message);
-      await supabaseAdmin
+      await supabase
         .from("scheduled_jobs")
         .update({
           status: "failed",

@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 
 const {
   isCronJobEnabled,
+  runDueScheduledJobs,
   startCronJobs,
 } = require("../src/services/cronService");
 
@@ -57,4 +58,43 @@ run("enabled cron registers the minute scheduler", () => {
   assert.equal(receivedExpression, "* * * * *");
   assert.equal(typeof receivedHandler, "function");
   assert.equal(task, scheduledTask);
+});
+
+run("content generation cron skips a job already claimed by another worker", async () => {
+  let claimCalls = 0;
+  let generationCalls = 0;
+  const dueJob = {
+    id: "job-1",
+    user_id: "user-1",
+    job_type: "content_auto_generate",
+    config: { contentPillarId: "pillar-1", topicIds: ["topic-1"] },
+    target_count: 1,
+    schedule_value: "2026-10-08T08:00:00.000Z",
+  };
+  const query = {
+    select() { return this; },
+    eq() { return this; },
+    lte() { return Promise.resolve({ data: [dueJob], error: null }); },
+  };
+  const supabase = {
+    from(table) {
+      assert.equal(table, "scheduled_jobs");
+      return query;
+    },
+  };
+
+  await runDueScheduledJobs({
+    isConfigured: true,
+    supabase,
+    claimContentGenerationJob: async () => {
+      claimCalls += 1;
+      return null;
+    },
+    generateContentOutputs: async () => {
+      generationCalls += 1;
+    },
+  });
+
+  assert.equal(claimCalls, 1);
+  assert.equal(generationCalls, 0);
 });
