@@ -159,6 +159,26 @@ async function consumeMonthlyAiCredits({
     return null;
   }
 
+  // New wallet flow: one atomic database operation prevents double charging and
+  // negative balances under concurrent AI requests. Older databases gracefully
+  // continue with the monthly-quota implementation below until the setup SQL runs.
+  if (typeof usageSupabase.rpc === "function") {
+    const referenceId = usage?.request_id || usage?.requestId || `${userId}:${Date.now()}:${Math.random()}`;
+    const { data: walletResult, error: walletError } = await usageSupabase.rpc("consume_ai_tokens", {
+      p_user_id: userId,
+      p_amount: creditsUsed,
+      p_reference_id: String(referenceId),
+      p_description: "Pemakaian fitur AI Reframe",
+    });
+    if (!walletError) {
+      return { ...(walletResult || {}), creditsUsed, wallet: true };
+    }
+    if (!/consume_ai_tokens|schema cache|function .* does not exist/i.test(walletError.message || "")) {
+      const status = /tidak cukup/i.test(walletError.message || "") ? 429 : 500;
+      throw createHttpError(walletError.message, status, walletError, status === 429 ? "INSUFFICIENT_TOKENS" : "TOKEN_DEBIT_FAILED");
+    }
+  }
+
   const activeSubscription = await getActiveUserSubscription({
     supabase: usageSupabase,
     userId,

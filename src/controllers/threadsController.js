@@ -129,11 +129,36 @@ async function retryFailedThreadsPost(req, res, next) {
   }
 }
 
+async function rescheduleContent(req, res, next) {
+  try {
+    const data = await threadsPublishService.rescheduleContentOutput({
+      supabase: req.supabase,
+      userId: req.user.id,
+      contentOutputId: req.params.contentOutputId,
+      scheduledAt: req.threadsRescheduleInput.scheduledAt,
+    });
+    return res.status(200).json({ success: true, message: "Content schedule updated", data });
+  } catch (error) { next(error); }
+}
+
+async function cancelContentSchedule(req, res, next) {
+  try {
+    const data = await threadsPublishService.cancelContentOutputSchedule({
+      supabase: req.supabase,
+      userId: req.user.id,
+      contentOutputId: req.params.contentOutputId,
+    });
+    return res.status(200).json({ success: true, message: "Content schedule cancelled", data });
+  } catch (error) { next(error); }
+}
+
 module.exports = {
   autoPostThreadsDrafts,
+  cancelContentSchedule,
   getConnectUrl,
   handleThreadsCallback,
   handleThreadsDeleteCallback,
   retryFailedThreadsPost,
+  rescheduleContent,
   runScheduledThreadsJob,
 };

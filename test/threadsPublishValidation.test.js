@@ -3,6 +3,8 @@ const assert = require("assert");
 const {
   normalizeAutoPostThreadsPayload,
   validateAutoPostThreadsRequest,
+  validateRescheduleContentRequest,
+  validateScheduledContentParam,
 } = require("../src/middlewares/threadsPublishValidationMiddleware");
 
 function run(name, fn) {
@@ -35,4 +37,23 @@ run("validateAutoPostThreadsRequest rejects missing scheduledAt", () => {
   });
 
   assert.equal(errorMessage, "Missing required field: scheduledAt");
+});
+
+run("validateScheduledContentParam accepts an individual content UUID", () => {
+  const req = { params: { contentOutputId: "123e4567-e89b-42d3-a456-426614174000" } };
+  let error;
+
+  validateScheduledContentParam(req, {}, (value) => { error = value; });
+
+  assert.equal(error, undefined);
+});
+
+run("validateRescheduleContentRequest normalizes scheduledAt", () => {
+  const req = { body: { scheduled_at: "2026-10-12T11:00:00.000Z" } };
+  let error;
+
+  validateRescheduleContentRequest(req, {}, (value) => { error = value; });
+
+  assert.equal(error, undefined);
+  assert.deepEqual(req.threadsRescheduleInput, { scheduledAt: "2026-10-12T11:00:00.000Z" });
 });

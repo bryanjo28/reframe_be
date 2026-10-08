@@ -375,7 +375,7 @@ async function generateContentTopics({ supabase, userId, payload }) {
     });
 
     const result = await sumopodService.generateChatCompletion({
-      model: "gpt-5-mini",
+      model: "gpt-5.6-luna",
       maxTokens: 1200,
       temperature: 0.7,
       messages: [

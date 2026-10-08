@@ -124,6 +124,30 @@ function validateRunScheduledThreadsJobRequest(req, res, next) {
   }
 }
 
+function validateScheduledContentParam(req, res, next) {
+  try {
+    if (!validateUuid(req.params.contentOutputId)) {
+      throw createHttpError("contentOutputId must be a valid UUID", 400);
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+function validateRescheduleContentRequest(req, res, next) {
+  try {
+    const scheduledAt = readOptionalText(getSource(req.body), ["scheduledAt", "scheduled_at"]);
+    if (!scheduledAt || Number.isNaN(Date.parse(scheduledAt))) {
+      throw createHttpError("scheduledAt must be a valid date-time string", 400);
+    }
+    req.threadsRescheduleInput = { scheduledAt };
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
 function normalizeRetryFailedThreadsPayload(payload = {}) {
   const source = getSource(payload);
 
@@ -165,5 +189,7 @@ module.exports = {
   normalizeRetryFailedThreadsPayload,
   validateAutoPostThreadsRequest,
   validateRetryFailedThreadsRequest,
+  validateRescheduleContentRequest,
   validateRunScheduledThreadsJobRequest,
+  validateScheduledContentParam,
 };

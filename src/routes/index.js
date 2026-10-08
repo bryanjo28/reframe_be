@@ -14,6 +14,7 @@ const usageRoutes = require("./usageRoutes");
 const sumopodRoutes = require("./sumopodRoutes");
 const threadsAccountsRoutes = require("./threadsAccountsRoutes");
 const threadsRoutes = require("./threadsRoutes");
+const paymentsRoutes = require("./paymentsRoutes");
 
 const router = express.Router();
 
@@ -55,5 +56,6 @@ router.use("/scheduled-jobs", scheduledJobsRoutes);
 router.use("/sumopod", sumopodRoutes);
 router.use("/threads-accounts", threadsAccountsRoutes);
 router.use("/threads", threadsRoutes);
+router.use("/payments", paymentsRoutes);
 
 module.exports = router;

@@ -9,7 +9,9 @@ const {
 const {
   validateAutoPostThreadsRequest,
   validateRetryFailedThreadsRequest,
+  validateRescheduleContentRequest,
   validateRunScheduledThreadsJobRequest,
+  validateScheduledContentParam,
 } = require("../middlewares/threadsPublishValidationMiddleware");
 
 const router = express.Router();
@@ -25,6 +27,21 @@ router.post(
   authMiddleware,
   validateAutoPostThreadsRequest,
   threadsController.autoPostThreadsDrafts
+);
+
+router.patch(
+  "/auto-post/:contentOutputId",
+  authMiddleware,
+  validateScheduledContentParam,
+  validateRescheduleContentRequest,
+  threadsController.rescheduleContent
+);
+
+router.delete(
+  "/auto-post/:contentOutputId",
+  authMiddleware,
+  validateScheduledContentParam,
+  threadsController.cancelContentSchedule
 );
 
 router.post(
