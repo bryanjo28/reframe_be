@@ -714,6 +714,61 @@ async function scheduleApprovedContentOutputs({
   };
 }
 
+async function scheduleSelectedContentOutputs({
+  supabase,
+  userId,
+  contentOutputIds,
+  scheduledAt,
+  scheduleContent = scheduleApprovedContentOutputs,
+}) {
+  const results = [];
+
+  for (const contentOutputId of contentOutputIds) {
+    try {
+      const scheduled = await scheduleContent({
+        supabase,
+        userId,
+        personaConfigId: null,
+        limit: 1,
+        scheduledAt,
+        contentOutputId,
+      });
+      const contentOutput = scheduled.results[0] || null;
+
+      if (!contentOutput || !scheduled.scheduledJob) {
+        throw createHttpError("Content output not found or not eligible for scheduling", 404);
+      }
+
+      results.push({
+        contentOutputId,
+        scheduledJobId: scheduled.scheduledJob.id,
+        status: "scheduled",
+        scheduledAt: contentOutput.scheduledAt || scheduledAt,
+        contentOutput,
+      });
+    } catch (error) {
+      results.push({
+        contentOutputId,
+        scheduledJobId: null,
+        status: "failed",
+        error: error.message,
+      });
+    }
+  }
+
+  const scheduledCount = results.filter((item) => item.status === "scheduled").length;
+
+  return {
+    success: true,
+    summary: {
+      requestedCount: contentOutputIds.length,
+      scheduledCount,
+      failedCount: results.length - scheduledCount,
+    },
+    results,
+  };
+}
+
 async function getEditableScheduledContent({ supabase, userId, contentOutputId }) {
   const { data, error } = await supabase.from("content_outputs").select("*")
     .eq("id", contentOutputId).eq("user_id", userId).maybeSingle();
@@ -1164,6 +1219,7 @@ async function autoPostThreadsDrafts({ supabase, userId, payload = {} }) {
   const input = {
     personaConfigId: payload.personaConfigId || payload.persona_config_id || null,
     contentOutputId: payload.contentOutputId || payload.content_output_id || null,
+    contentOutputIds: payload.contentOutputIds || payload.content_output_ids || null,
     limit:
       payload.limit === undefined || payload.limit === null || payload.limit === ""
         ? 10
@@ -1177,6 +1233,15 @@ async function autoPostThreadsDrafts({ supabase, userId, payload = {} }) {
 
   if (Number.isNaN(Date.parse(input.scheduledAt))) {
     throw createHttpError("scheduledAt must be a valid date-time string", 400);
+  }
+
+  if (Array.isArray(input.contentOutputIds) && input.contentOutputIds.length > 0) {
+    return scheduleSelectedContentOutputs({
+      supabase,
+      userId,
+      contentOutputIds: [...new Set(input.contentOutputIds)],
+      scheduledAt: input.scheduledAt,
+    });
   }
 
   if (input.contentOutputId) {
@@ -1692,6 +1757,7 @@ module.exports = {
   retryFailedThreadsPost,
   rescheduleContentOutput,
   scheduleApprovedContentOutputs,
+  scheduleSelectedContentOutputs,
   runScheduledThreadsJob,
   claimScheduledThreadsJob,
   publishTextThread,

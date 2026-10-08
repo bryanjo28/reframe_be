@@ -44,6 +44,21 @@ function readOptionalNumber(source, keys) {
   return Number.isFinite(numberValue) ? numberValue : null;
 }
 
+function readOptionalTextArray(source, keys) {
+  if (!hasKey(source, keys)) {
+    return undefined;
+  }
+
+  const matchedKey = keys.find((key) => Object.prototype.hasOwnProperty.call(source, key));
+  const value = source[matchedKey];
+
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  return value.map((item) => String(item).trim());
+}
+
 function validateUuid(value) {
   return (
     typeof value === "string" &&
@@ -57,6 +72,7 @@ function normalizeAutoPostThreadsPayload(payload = {}) {
   return {
     personaConfigId: readOptionalText(source, ["personaConfigId", "persona_config_id"]),
     contentOutputId: readOptionalText(source, ["contentOutputId", "content_output_id"]),
+    contentOutputIds: readOptionalTextArray(source, ["contentOutputIds", "content_output_ids"]),
     limit: readOptionalNumber(source, ["limit"]),
     scheduledAt: readOptionalText(source, ["scheduledAt", "scheduled_at"]),
   };
@@ -72,6 +88,17 @@ function validateAutoPostThreadsRequest(req, res, next) {
 
     if (threadsAutoPostInput.contentOutputId && !validateUuid(threadsAutoPostInput.contentOutputId)) {
       throw createHttpError("contentOutputId must be a valid UUID", 400);
+    }
+
+    if (threadsAutoPostInput.contentOutputIds !== undefined) {
+      if (
+        !Array.isArray(threadsAutoPostInput.contentOutputIds) ||
+        threadsAutoPostInput.contentOutputIds.length < 1 ||
+        threadsAutoPostInput.contentOutputIds.length > 20 ||
+        threadsAutoPostInput.contentOutputIds.some((id) => !validateUuid(id))
+      ) {
+        throw createHttpError("contentOutputIds must contain valid UUIDs", 400);
+      }
     }
 
     if (!threadsAutoPostInput.scheduledAt) {
