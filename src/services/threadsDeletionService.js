@@ -98,17 +98,22 @@ async function deleteThreadsData(signedRequest) {
     const accountIds = accounts.map((account) => account.id);
     const userIds = [...new Set(accounts.map((account) => account.user_id))];
     for (const userId of userIds) {
+      await checked(supabase.from("scheduled_jobs").update({ status: "cancelled", next_run_at: null })
+        .eq("user_id", userId).eq("job_type", "threads_auto_post").in("status", ["active", "paused"]));
+      // A cancellation request is not proof that the worker has finished writing.
+      await checked(supabase.from("scheduled_jobs").update({ status: "cancelling", next_run_at: null })
+        .eq("user_id", userId).eq("job_type", "threads_auto_post").eq("status", "running"));
       const jobs = await readAll(() => supabase.from("scheduled_jobs").select("id")
         .eq("user_id", userId).eq("job_type", "threads_auto_post"));
       await forEachBatch(jobs.map((job) => job.id), async (jobIds) => {
-        // Stop future claims before inspecting running jobs or clearing their results.
-        await checked(supabase.from("scheduled_jobs").update({ status: "paused", next_run_at: null })
-          .eq("user_id", userId).eq("status", "active").in("id", jobIds));
         const running = await checked(supabase.from("scheduled_jobs").select("id")
-          .eq("user_id", userId).eq("status", "running").in("id", jobIds));
+          .eq("user_id", userId).in("status", ["running", "cancelling", "updating"]).in("id", jobIds));
         if (running.length) {
-          throw httpError("Threads publishing is still running; retry data deletion after it finishes", 503);
+          throw httpError("Threads worker is stopping; retry data deletion after it stops", 503);
         }
+        await checked(supabase.from("content_outputs").update({
+          scheduled_at: null, publish_scheduled_job_id: null, publish_scheduled_job_run_id: null,
+        }).eq("user_id", userId).in("publish_scheduled_job_id", jobIds));
         await checked(supabase.from("scheduled_job_runs").update({ result_payload: null, error_message: null })
           .eq("user_id", userId).in("scheduled_job_id", jobIds));
         await checked(supabase.from("scheduled_jobs").update({ last_run_error: null, error_message: null })

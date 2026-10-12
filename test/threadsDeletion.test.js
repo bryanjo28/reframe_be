@@ -54,7 +54,7 @@ async function main() {
       { id: "account-other", user_id: "user-other", platform: "threads", platform_user_id: "other-id" },
     ],
     published_posts: Array.from({ length: 120 }, (_, index) => ({ id: `post-${index}`, social_account_id: "account-1", content_output_id: `output-${index}` })),
-    content_outputs: Array.from({ length: 120 }, (_, index) => ({ id: `output-${index}`, external_post_id: `meta-post-${index}`, content: "Keep authored content" })),
+    content_outputs: Array.from({ length: 120 }, (_, index) => ({ id: `output-${index}`, user_id: "user-1", external_post_id: `meta-post-${index}`, content: "Keep authored content", scheduled_at: "2026-12-01T00:00:00Z", publish_scheduled_job_id: "job-1" })),
     scheduled_jobs: [
       { id: "job-1", user_id: "user-1", job_type: "threads_auto_post", status: "active" },
       { id: "job-other", user_id: "user-other", job_type: "threads_auto_post", status: "active" },
@@ -90,11 +90,12 @@ async function main() {
     assert(calls.some((call) => call[0] === "social_accounts" && call[1] === "delete"));
     assert(rows.content_outputs.every((row) => row.external_post_id === null), "Every external ID must be cleared, including rows beyond the database response limit");
     assert(rows.content_outputs.every((row) => row.content === "Keep authored content"));
+    assert(rows.content_outputs.every((row) => row.scheduled_at === null && row.publish_scheduled_job_id === null), "Cancelled schedule links must be cleared so authored content can be scheduled again");
     assert.equal(rows.scheduled_job_runs[0].result_payload, null, "Job results must not retain deleted Meta data");
     assert.equal(rows.scheduled_job_runs[0].error_message, null);
     assert.equal(rows.scheduled_job_runs[0].success_count, 1);
     assert.deepEqual(rows.scheduled_job_runs[1].result_payload, { keep: true });
-    assert.equal(rows.scheduled_jobs[0].status, "paused");
+    assert.equal(rows.scheduled_jobs[0].status, "cancelled");
     assert.equal(rows.scheduled_jobs[1].status, "active");
     assert.equal(rows.scheduled_jobs[2].status, "active");
     assert.deepEqual(rows.social_accounts.map((row) => row.id), ["account-other"]);
@@ -127,9 +128,11 @@ async function main() {
     supabaseConfig.supabaseAdmin = createDatabase(retryRows, []);
     const busy = await postCallback();
     assert.equal(busy.status, 503, "Running publishers must finish before a completion receipt is issued");
+    assert.equal(retryRows.scheduled_jobs[0].status, "cancelling", "Deletion must ask running workers to stop without declaring them stopped");
     assert.equal(retryRows.social_accounts.length, 1);
     assert.deepEqual(retryRows.scheduled_job_runs[0].result_payload, { postUrl: "private-url" });
-    retryRows.scheduled_jobs[0].status = "completed";
+    assert.equal((await postCallback()).status, 503, "A cancelling worker still blocks deletion");
+    retryRows.scheduled_jobs[0].status = "cancelled";
     supabaseConfig.supabaseAdmin = createDatabase(retryRows, [], { table: "scheduled_job_runs", operation: "update" });
     const failedCleanup = await postCallback();
     assert.equal(failedCleanup.status, 500);
