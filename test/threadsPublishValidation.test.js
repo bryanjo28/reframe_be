@@ -5,6 +5,7 @@ const {
   validateAutoPostThreadsRequest,
   validateRescheduleContentRequest,
   validateScheduledContentParam,
+  validateRetryFailedThreadsRequest,
 } = require("../src/middlewares/threadsPublishValidationMiddleware");
 
 function run(name, fn) {
@@ -26,6 +27,30 @@ run("normalizeAutoPostThreadsPayload maps camelCase and snake_case", () => {
 
   assert.equal(payload.contentOutputId, "uuid-123");
   assert.equal(payload.limit, 5);
+});
+
+for (const dateKey of ["scheduleAt", "scheduledAt", "scheduled_at"]) {
+  run(`retry accepts ${dateKey} from FE`, () => {
+    const req = { body: {
+      contentOutputId: "123e4567-e89b-42d3-a456-426614174000",
+      [dateKey]: "2026-10-12T18:00:00+07:00",
+    } };
+    let error;
+    validateRetryFailedThreadsRequest(req, {}, (value) => { error = value; });
+    assert.equal(error, undefined);
+    assert.equal(req.threadsRetryInput.scheduledAt, "2026-10-12T18:00:00+07:00");
+  });
+}
+
+run("retry rejects an invalid scheduleAt instead of scheduling immediately", () => {
+  const req = { body: {
+    contentOutputId: "123e4567-e89b-42d3-a456-426614174000",
+    scheduleAt: "invalid-date",
+  } };
+  let error;
+  validateRetryFailedThreadsRequest(req, {}, (value) => { error = value; });
+  assert.equal(error?.status, 400);
+  assert.equal(req.threadsRetryInput, undefined);
 });
 
 run("normalizeAutoPostThreadsPayload keeps selected content IDs", () => {

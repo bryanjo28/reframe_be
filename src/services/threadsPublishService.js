@@ -1310,7 +1310,7 @@ async function autoPostThreadsDrafts({ supabase, userId, payload = {} }) {
 async function retryFailedThreadsPost({ supabase, userId, payload = {} }) {
   const input = {
     contentOutputId: payload.contentOutputId || payload.content_output_id || null,
-    scheduledAt: payload.scheduledAt || payload.scheduled_at || new Date().toISOString(),
+    scheduledAt: payload.scheduledAt || payload.scheduled_at || payload.scheduleAt || new Date().toISOString(),
   };
 
   if (!input.contentOutputId) {

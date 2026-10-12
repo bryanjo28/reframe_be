@@ -16,7 +16,7 @@ async function run(name, fn) {
   }
 }
 
-function createListDatabase({ tableName, rows, total, expectedRange }) {
+function createListDatabase({ tableName, rows, total, expectedRange, expectedFilters = [] }) {
   const observed = {
     count: null,
     filters: [],
@@ -34,6 +34,12 @@ function createListDatabase({ tableName, rows, total, expectedRange }) {
           return this;
         },
         eq(key, value) {
+          assert.equal(observed.range, null, "filters must be applied before pagination");
+          observed.filters.push([key, value]);
+          return this;
+        },
+        ilike(key, value) {
+          assert.equal(observed.range, null, "filters must be applied before pagination");
           observed.filters.push([key, value]);
           return this;
         },
@@ -56,7 +62,7 @@ function createListDatabase({ tableName, rows, total, expectedRange }) {
     },
     assertRequest(userId) {
       assert.equal(observed.count, "exact");
-      assert.deepEqual(observed.filters, [["user_id", userId]]);
+      assert.deepEqual(observed.filters, [["user_id", userId], ...expectedFilters]);
       assert.deepEqual(observed.range, expectedRange);
     },
   };
@@ -86,6 +92,29 @@ run("content outputs list returns page metadata and only requests that page", as
     hasNextPage: true,
   });
 });
+
+for (const jobIdKey of ["publishScheduledJobId", "publish_scheduled_job_id"]) {
+  run(`content outputs filters failed Threads posts by ${jobIdKey} before pagination`, async () => {
+    const jobId = "123e4567-e89b-42d3-a456-426614174000";
+    const database = createListDatabase({
+      tableName: "content_outputs",
+      rows: [{ id: "failed-output", status: "failed", platform: "Threads", publish_scheduled_job_id: jobId }],
+      total: 3,
+      expectedRange: [2, 3],
+      expectedFilters: [["status", "failed"], ["platform", "threads"], ["publish_scheduled_job_id", jobId]],
+    });
+
+    const result = await listContentOutputs({
+      supabase: database,
+      userId: "user-1",
+      query: { status: " failed ", platform: "threads", [jobIdKey]: jobId, page: "2", limit: "2" },
+    });
+
+    database.assertRequest("user-1");
+    assert.equal(result.data[0].publishScheduledJobId, jobId);
+    assert.deepEqual(result.pagination, { page: 2, limit: 2, total: 3, totalPages: 2, hasNextPage: false });
+  });
+}
 
 run("content topics list returns page metadata and only requests that page", async () => {
   const database = createListDatabase({

@@ -1027,6 +1027,24 @@ async function listContentOutputs({ supabase, userId, query = {} }) {
     .select("*", { count: "exact" })
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
+  const source = getSource(query);
+  const status = readOptionalText(source, ["status"]);
+  const platform = readOptionalText(source, ["platform"]);
+  const publishScheduledJobId = readOptionalText(source, [
+    "publishScheduledJobId",
+    "publish_scheduled_job_id",
+  ]);
+
+  if (status) {
+    databaseQuery.eq("status", status);
+  }
+  if (platform) {
+    databaseQuery.ilike("platform", platform);
+  }
+  if (publishScheduledJobId) {
+    databaseQuery.eq("publish_scheduled_job_id", publishScheduledJobId);
+  }
+
   const { data, count, error } = await applyPagination(databaseQuery, pagination);
 
   if (error) {

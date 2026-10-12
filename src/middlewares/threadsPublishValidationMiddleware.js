@@ -180,7 +180,7 @@ function normalizeRetryFailedThreadsPayload(payload = {}) {
 
   return {
     contentOutputId: readOptionalText(source, ["contentOutputId", "content_output_id"]),
-    scheduledAt: readOptionalText(source, ["scheduledAt", "scheduled_at"]),
+    scheduledAt: readOptionalText(source, ["scheduledAt", "scheduled_at", "scheduleAt"]),
   };
 }
 
