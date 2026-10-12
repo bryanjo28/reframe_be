@@ -13,6 +13,7 @@ require("./threadsAccountsValidation.test");
 require("./threadsAccountsService.test");
 require("./threadsAuthService.test");
 require("./threadsPublishValidation.test");
+require("./threadsSelectedScheduling.test");
 require("./threadsPublishChain.test");
 require("./threadsPublishProgress.test");
 require("./threadsContainerPolling.test");

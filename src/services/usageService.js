@@ -66,7 +66,7 @@ async function getMyUsageSummary({ supabase, userId, now = new Date() }) {
   const periodMonth = getCurrentPeriodMonth(now);
   const usageDate = getUsageDate(now);
 
-  const [monthlyUsage, topicDailyUsage, contentDailyUsage] = await Promise.all([
+  const [monthlyUsage, topicDailyUsage, contentDailyUsage, walletResult] = await Promise.all([
     getCurrentMonthlyAiUsage({
       supabase,
       userId,
@@ -87,20 +87,29 @@ async function getMyUsageSummary({ supabase, userId, now = new Date() }) {
       usageDate,
       now,
     }),
+    supabase.from("token_wallets").select("balance, updated_at").eq("user_id", userId).maybeSingle(),
   ]);
 
   const plan = activeSubscription.plan;
+
+  const monthlySummary = mapMonthlyUsageSummary({
+    plan,
+    usage: monthlyUsage.usage,
+    periodMonth,
+  });
+  if (!walletResult.error && walletResult.data) {
+    monthlySummary.remaining = Number(walletResult.data.balance || 0);
+    monthlySummary.limit = monthlySummary.used + monthlySummary.remaining;
+    monthlySummary.unlimited = false;
+  }
 
   return {
     subscription: activeSubscription.subscription,
     plan,
     periodMonth,
     usageDate,
-    monthlyUsage: mapMonthlyUsageSummary({
-      plan,
-      usage: monthlyUsage.usage,
-      periodMonth,
-    }),
+    wallet: !walletResult.error ? walletResult.data : null,
+    monthlyUsage: monthlySummary,
     dailyUsage: {
       generateTopic: mapDailyUsageSummary({
         plan,

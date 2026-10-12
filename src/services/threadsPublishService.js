@@ -598,6 +598,8 @@ async function scheduleApprovedContentOutputs({
     .eq("user_id", userId)
     .eq("status", "approved")
     .ilike("platform", "threads")
+    .is("publish_scheduled_job_id", null)
+    .is("publish_scheduled_job_run_id", null)
     .order("created_at", { ascending: true })
     .limit(queryLimit > 0 ? queryLimit : 10);
 
@@ -644,14 +646,19 @@ async function scheduleApprovedContentOutputs({
     };
   }
 
+  // Single-content scheduling is initiated with a contentOutputId. In that
+  // flow the caller does not need to repeat the persona id because the
+  // selected content output already owns it.
+  const resolvedPersonaConfigId = personaConfigId || rows[0]?.persona_config_id || null;
+
   const scheduledJob = await scheduledJobsService.createScheduledJob({
     supabase,
     userId,
     payload: {
-      personaConfigId,
+      personaConfigId: resolvedPersonaConfigId,
       jobType: "threads_auto_post",
       config: {
-        personaConfigId,
+        personaConfigId: resolvedPersonaConfigId,
         scheduledAt,
         contentOutputId,
       },
@@ -705,6 +712,143 @@ async function scheduleApprovedContentOutputs({
     availableCount: rows.length,
     results,
   };
+}
+
+async function scheduleSelectedContentOutputs({
+  supabase,
+  userId,
+  contentOutputIds,
+  scheduledAt,
+  scheduleContent = scheduleApprovedContentOutputs,
+}) {
+  const results = [];
+
+  for (const contentOutputId of contentOutputIds) {
+    try {
+      const scheduled = await scheduleContent({
+        supabase,
+        userId,
+        personaConfigId: null,
+        limit: 1,
+        scheduledAt,
+        contentOutputId,
+      });
+      const contentOutput = scheduled.results[0] || null;
+
+      if (!contentOutput || !scheduled.scheduledJob) {
+        throw createHttpError("Content output not found or not eligible for scheduling", 404);
+      }
+
+      results.push({
+        contentOutputId,
+        scheduledJobId: scheduled.scheduledJob.id,
+        status: "scheduled",
+        scheduledAt: contentOutput.scheduledAt || scheduledAt,
+        contentOutput,
+      });
+    } catch (error) {
+      results.push({
+        contentOutputId,
+        scheduledJobId: null,
+        status: "failed",
+        error: error.message,
+      });
+    }
+  }
+
+  const scheduledCount = results.filter((item) => item.status === "scheduled").length;
+
+  return {
+    success: true,
+    summary: {
+      requestedCount: contentOutputIds.length,
+      scheduledCount,
+      failedCount: results.length - scheduledCount,
+    },
+    results,
+  };
+}
+
+async function getEditableScheduledContent({ supabase, userId, contentOutputId }) {
+  const { data, error } = await supabase.from("content_outputs").select("*")
+    .eq("id", contentOutputId).eq("user_id", userId).maybeSingle();
+  if (error) throw createHttpError(error.message, 400, error);
+  if (!data) throw createHttpError("Scheduled content not found", 404);
+  if (!isApprovedStatus(data.status) || !isThreadsPlatform(data.platform)) {
+    throw createHttpError("Only approved Threads content can change schedule", 409);
+  }
+  if (data.external_post_id || data.publish_scheduled_job_run_id) {
+    throw createHttpError("Content is already publishing or published", 409);
+  }
+  if (!data.publish_scheduled_job_id || !data.scheduled_at) {
+    throw createHttpError("Content is not currently scheduled", 409);
+  }
+  return data;
+}
+
+async function lockEditableSchedule({ supabase, userId, scheduledJobId }) {
+  const { data, error } = await supabase.from("scheduled_jobs").update({ status: "updating" })
+    .eq("id", scheduledJobId).eq("user_id", userId).eq("status", "active")
+    .select("*").maybeSingle();
+  if (error) throw createHttpError(error.message, 400, error);
+  if (!data) throw createHttpError("Schedule is already running or no longer editable", 409);
+  return data;
+}
+
+async function rescheduleContentOutput({ supabase, userId, contentOutputId, scheduledAt }) {
+  if (!scheduledAt || Number.isNaN(Date.parse(scheduledAt))) throw createHttpError("scheduledAt must be a valid date-time string", 400);
+  if (Date.parse(scheduledAt) <= Date.now()) throw createHttpError("scheduledAt must be in the future", 400);
+  const contentOutput = await getEditableScheduledContent({ supabase, userId, contentOutputId });
+  const job = await lockEditableSchedule({ supabase, userId, scheduledJobId: contentOutput.publish_scheduled_job_id });
+  const previousConfig = job.config && typeof job.config === "object" ? job.config : {};
+  try {
+    const { data: updatedContent, error: contentError } = await supabase.from("content_outputs")
+      .update({ scheduled_at: scheduledAt }).eq("id", contentOutputId).eq("user_id", userId)
+      .eq("publish_scheduled_job_id", job.id).is("publish_scheduled_job_run_id", null)
+      .select("*").maybeSingle();
+    if (contentError) throw createHttpError(contentError.message, 400, contentError);
+    if (!updatedContent) throw createHttpError("Schedule changed before it could be updated", 409);
+    const { data: updatedJob, error: jobError } = await supabase.from("scheduled_jobs").update({
+      status: "active", schedule_value: scheduledAt, next_run_at: scheduledAt,
+      config: { ...previousConfig, scheduledAt, contentOutputId },
+    }).eq("id", job.id).eq("user_id", userId).eq("status", "updating").select("id").maybeSingle();
+    if (jobError) throw createHttpError(jobError.message, 400, jobError);
+    if (!updatedJob) throw createHttpError("Schedule changed before it could be updated", 409);
+    return mapContentOutputRow(updatedContent);
+  } catch (error) {
+    await supabase.from("content_outputs").update({ scheduled_at: contentOutput.scheduled_at })
+      .eq("id", contentOutputId).eq("user_id", userId).eq("publish_scheduled_job_id", job.id)
+      .is("publish_scheduled_job_run_id", null);
+    await supabase.from("scheduled_jobs").update({ status: "active" }).eq("id", job.id).eq("user_id", userId).eq("status", "updating");
+    throw error;
+  }
+}
+
+async function cancelContentOutputSchedule({ supabase, userId, contentOutputId }) {
+  const contentOutput = await getEditableScheduledContent({ supabase, userId, contentOutputId });
+  const job = await lockEditableSchedule({ supabase, userId, scheduledJobId: contentOutput.publish_scheduled_job_id });
+  try {
+    const { data: updatedContent, error: contentError } = await supabase.from("content_outputs")
+      .update({ scheduled_at: null, publish_scheduled_job_id: null, publish_scheduled_job_run_id: null })
+      .eq("id", contentOutputId).eq("user_id", userId).eq("publish_scheduled_job_id", job.id)
+      .is("publish_scheduled_job_run_id", null).select("*").maybeSingle();
+    if (contentError) throw createHttpError(contentError.message, 400, contentError);
+    if (!updatedContent) throw createHttpError("Schedule changed before it could be cancelled", 409);
+    const { data: cancelledJob, error: jobError } = await supabase.from("scheduled_jobs").update({ status: "cancelled", next_run_at: null })
+      .eq("id", job.id).eq("user_id", userId).eq("status", "updating").select("id").maybeSingle();
+    if (jobError) throw createHttpError(jobError.message, 400, jobError);
+    if (!cancelledJob) throw createHttpError("Schedule changed before it could be cancelled", 409);
+    return mapContentOutputRow(updatedContent);
+  } catch (error) {
+    await supabase.from("content_outputs").update({
+      scheduled_at: contentOutput.scheduled_at,
+      publish_scheduled_job_id: job.id,
+      publish_scheduled_job_run_id: null,
+    }).eq("id", contentOutputId).eq("user_id", userId).is("publish_scheduled_job_id", null)
+      .is("publish_scheduled_job_run_id", null);
+    await supabase.from("scheduled_jobs").update({ status: "active" }).eq("id", job.id).eq("user_id", userId).eq("status", "updating");
+    throw error;
+  }
 }
 
 async function getDraftContentOutputById({ supabase, userId, contentOutputId }) {
@@ -1075,6 +1219,7 @@ async function autoPostThreadsDrafts({ supabase, userId, payload = {} }) {
   const input = {
     personaConfigId: payload.personaConfigId || payload.persona_config_id || null,
     contentOutputId: payload.contentOutputId || payload.content_output_id || null,
+    contentOutputIds: payload.contentOutputIds || payload.content_output_ids || null,
     limit:
       payload.limit === undefined || payload.limit === null || payload.limit === ""
         ? 10
@@ -1088,6 +1233,15 @@ async function autoPostThreadsDrafts({ supabase, userId, payload = {} }) {
 
   if (Number.isNaN(Date.parse(input.scheduledAt))) {
     throw createHttpError("scheduledAt must be a valid date-time string", 400);
+  }
+
+  if (Array.isArray(input.contentOutputIds) && input.contentOutputIds.length > 0) {
+    return scheduleSelectedContentOutputs({
+      supabase,
+      userId,
+      contentOutputIds: [...new Set(input.contentOutputIds)],
+      scheduledAt: input.scheduledAt,
+    });
   }
 
   if (input.contentOutputId) {
@@ -1596,11 +1750,14 @@ async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit 
 
 module.exports = {
   autoPostThreadsDrafts,
+  cancelContentOutputSchedule,
   getDraftContentOutputById,
   getDraftContentOutputs,
   publishSingleDraft,
   retryFailedThreadsPost,
+  rescheduleContentOutput,
   scheduleApprovedContentOutputs,
+  scheduleSelectedContentOutputs,
   runScheduledThreadsJob,
   claimScheduledThreadsJob,
   publishTextThread,
