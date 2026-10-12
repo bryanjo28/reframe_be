@@ -17,8 +17,9 @@ const router = express.Router();
 router.get("/connect", authMiddleware, threadsController.getConnectUrl);
 router.post("/connect", authMiddleware, threadsController.getConnectUrl);
 router.get("/callback", threadsController.handleThreadsCallback);
-router.post("/delete", authMiddleware, threadsController.handleThreadsDeleteCallback);
-router.delete("/delete", authMiddleware, threadsController.handleThreadsDeleteCallback);
+router.post("/delete", threadsController.handleThreadsDeleteCallback);
+router.get("/delete/status/:code", threadsController.getThreadsDeletionStatus);
+router.delete("/delete", authMiddleware, threadsController.disconnectThreadsAccount);
 
 router.post(
   "/auto-post",

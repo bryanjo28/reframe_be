@@ -1,6 +1,7 @@
 const threadsPublishService = require("../services/threadsPublishService");
 const threadsAuthService = require("../services/threadsAuthService");
 const threadsAccountsService = require("../services/threadsAccountsService");
+const threadsDeletionService = require("../services/threadsDeletionService");
 
 async function getConnectUrl(req, res, next) {
   try {
@@ -55,6 +56,24 @@ async function handleThreadsCallback(req, res, next) {
 }
 
 async function handleThreadsDeleteCallback(req, res, next) {
+  try {
+    const result = await threadsDeletionService.deleteThreadsData(req.body?.signed_request);
+    return res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+function getThreadsDeletionStatus(req, res, next) {
+  try {
+    res.set("Cache-Control", "no-store");
+    return res.status(200).json(threadsDeletionService.getDeletionStatus(req.params.code));
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function disconnectThreadsAccount(req, res, next) {
   try {
     const data = await threadsAccountsService.disconnectThreadsAccount({
       supabase: req.supabase,
@@ -130,6 +149,8 @@ async function retryFailedThreadsPost(req, res, next) {
 }
 
 module.exports = {
+  disconnectThreadsAccount,
+  getThreadsDeletionStatus,
   autoPostThreadsDrafts,
   getConnectUrl,
   handleThreadsCallback,

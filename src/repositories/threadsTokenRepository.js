@@ -32,6 +32,15 @@ async function save(payload) {
   return record;
 }
 
+async function deleteByThreadsUserId(threadsUserId) {
+  for (let index = tokenStore.length - 1; index >= 0; index -= 1) {
+    if (tokenStore[index].provider === "threads" && tokenStore[index].threadsUserId === threadsUserId) {
+      tokenStore.splice(index, 1);
+    }
+  }
+}
+
 module.exports = {
+  deleteByThreadsUserId,
   save,
 };
