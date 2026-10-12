@@ -226,6 +226,7 @@ function markThreadSequenceFailure({
 }
 
 module.exports = {
+  mapPublishedPostRow,
   loadThreadPublishProgress,
   validateThreadResumeState,
   reserveThreadSequence,
