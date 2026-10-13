@@ -1,9 +1,5 @@
 ﻿const authService = require("../services/authService");
 
-const { DEV_AUTH_PROFILE, DEV_AUTH_USER } = require("../config/devAuth");
-
-const devPersonaStore = require("../store/devPersonaStore");
-
 async function register(req, res, next) {
   try {
     const result = await authService.register(req.authInput || req.body);
@@ -82,19 +78,6 @@ async function resetPassword(req, res, next) {
 
 async function me(req, res, next) {
   try {
-    if (req.isDevAuth) {
-      return res.status(200).json({
-        success: true,
-        message: "Current development user fetched successfully",
-        data: {
-          user: DEV_AUTH_USER,
-          profile: DEV_AUTH_PROFILE,
-          onboarding: { hasPersona: devPersonaStore.list(DEV_AUTH_USER.id).length > 0 },
-          socialAccounts: null,
-        },
-      });
-    }
-
     const result = await authService.getCurrentUserProfile({
       user: req.user,
       supabase: req.supabase,
@@ -167,14 +150,6 @@ async function changePassword(req, res, next) {
 
 async function logout(req, res, next) {
   try {
-    if (req.isDevAuth) {
-      return res.status(200).json({
-        success: true,
-        message: "Development session cleared",
-        data: { signedOut: true },
-      });
-    }
-
     const result = await authService.logout({
       supabase: req.supabase,
     });

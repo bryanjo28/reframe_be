@@ -23,9 +23,9 @@ function buildPrompt(threadType) {
   return buildContentOutputUserPrompt({
     persona: {},
     topic: {},
-    contentPillar: { threadType },
+    contentPillar: {},
     promptTemplate: null,
-    promptContext: {},
+    promptContext: { threadType },
     sourceContentOutput: null,
   });
 }
@@ -50,12 +50,13 @@ run("content output prompt includes variant context and optional instruction", (
   const prompt = buildContentOutputUserPrompt({
     persona: {},
     topic: { topic: "Product launch" },
-    contentPillar: { threadType: "short" },
+    contentPillar: {},
     promptTemplate: null,
     promptContext: {
       variantCount: 3,
       variantIndex: 2,
       additionalPrompt: "Gunakan sudut pandang founder",
+      threadType: "short",
     },
     sourceContentOutput: null,
   });
@@ -96,7 +97,7 @@ run("content output insert snapshots thread type with a short default", () => {
   assert.equal(defaultPayload.thread_type, "short");
 });
 
-run("explicit request thread type overrides the pillar default", () => {
+run("content output thread type comes from the request, not the pillar", () => {
   assert.equal(
     resolveContentOutputThreadType(
       { threadType: "long" },
@@ -104,6 +105,7 @@ run("explicit request thread type overrides the pillar default", () => {
     ),
     "short"
   );
+  assert.equal(resolveContentOutputThreadType({ threadType: "long" }, {}), "short");
   assert.equal(resolveContentOutputThreadType(null, {}), "short");
 });
 

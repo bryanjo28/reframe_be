@@ -202,6 +202,10 @@ function assertAutoGenerateContentOutputsPayload(payload) {
   if (payload.targetCount < 1 || payload.targetCount > 20) {
     throw createHttpError("targetCount must be between 1 and 20", 400);
   }
+
+  if (payload.threadType && !["short", "long"].includes(payload.threadType)) {
+    throw createHttpError("threadType must be either short or long", 400);
+  }
 }
 
 function parseThreadParts(content, threadType = "short") {
@@ -228,7 +232,7 @@ function parseThreadParts(content, threadType = "short") {
 }
 
 function resolveContentOutputThreadType(contentPillar, input = {}) {
-  return input.threadType || contentPillar?.threadType || "short";
+  return input.threadType || "short";
 }
 
 function mapContentOutputRow(row) {
@@ -524,7 +528,7 @@ function buildContentOutputUserPrompt({
   promptContext,
   sourceContentOutput,
 }) {
-  const threadType = contentPillar?.threadType || promptContext.threadType || "short";
+  const threadType = promptContext.threadType || "short";
   const threadRequirements =
     threadType === "long"
       ? [
@@ -979,7 +983,7 @@ function buildPromptContext({ persona, topic, contentPillar, sourceContentOutput
     pillarKeyMessage: contentPillar?.keyMessage || "",
     pillarCtaDirection: contentPillar?.ctaDirection || "",
     pillarAffiliateLink: contentPillar?.affiliateLink || "",
-    threadType: contentPillar?.threadType || "short",
+    threadType: input.threadType || "short",
     category: topic?.category || "",
     topic: topic?.topic || "",
     platform: input.platform || persona?.platform || "threads",
@@ -1390,6 +1394,10 @@ async function generateContentOutput({ supabase, userId, payload }) {
     throw createHttpError("Missing required field: topicId", 400);
   }
 
+  if (!input.threadType) {
+    throw createHttpError("Missing required field: threadType", 400);
+  }
+
   const variantCount = input.variantCount === undefined || input.variantCount === null
     ? 1
     : input.variantCount;
@@ -1441,6 +1449,7 @@ async function autoGenerateContentOutputs({ supabase, userId, payload }) {
 
   const input = normalizeAutoGenerateContentOutputsPayload(payload);
   assertAutoGenerateContentOutputsPayload(input);
+  input.threadType = input.threadType || "short";
 
   const contentPillar = await assertContentPillarBelongsToUserAndPersona({
     supabase,

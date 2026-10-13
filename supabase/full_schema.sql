@@ -253,7 +253,6 @@ CREATE TABLE public.content_pillars (
   sort_order integer NOT NULL DEFAULT 0,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
-  thread_type text NOT NULL DEFAULT 'short'::text CHECK (thread_type = ANY (ARRAY['short'::text, 'long'::text])),
   CONSTRAINT content_pillars_pkey PRIMARY KEY (id),
   CONSTRAINT content_pillars_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
   CONSTRAINT content_pillars_persona_config_id_fkey FOREIGN KEY (persona_config_id) REFERENCES public.persona_configs(id)

@@ -49,24 +49,6 @@ async function generateChatCompletion({
   };
 }
 
-async function testChatCompletion({
-  prompt = "Say hello in a creative way",
-  model = "gemini-2.5-flash-lite",
-  maxTokens = 150,
-  temperature = 0.5,
-  systemPrompt = "You are a helpful assistant that answers clearly and concisely in Bahasa Indonesia.",
-}) {
-  return generateChatCompletion({
-    model,
-    maxTokens,
-    temperature,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: prompt },
-    ],
-  });
-}
-
 function getSumoPodConfigStatus() {
   const apiKey = process.env.SUMO_API_KEY || "";
   const baseURL = process.env.SUMO_BASE_URL || "";
@@ -82,5 +64,4 @@ function getSumoPodConfigStatus() {
 module.exports = {
   generateChatCompletion,
   getSumoPodConfigStatus,
-  testChatCompletion,
 };

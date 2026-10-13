@@ -130,7 +130,6 @@ function mapContentPillarRow(row) {
     keyMessage: row.key_message,
     ctaDirection: row.cta_direction,
     affiliateLink: row.affiliate_link,
-    threadType: row.thread_type,
     isActive: row.is_active,
     sortOrder: row.sort_order,
     createdAt: row.created_at,
@@ -142,7 +141,7 @@ async function getOwnedContentPillarWithPersona({ supabase, userId, contentPilla
   const { data: contentPillarData, error: contentPillarError } = await supabase
     .from("content_pillars")
     .select(
-      "id, user_id, persona_config_id, pillar_name, template_content, target_objective, audience_segment, key_message, cta_direction, affiliate_link, thread_type, is_active, sort_order, created_at, updated_at"
+      "id, user_id, persona_config_id, pillar_name, template_content, target_objective, audience_segment, key_message, cta_direction, affiliate_link, is_active, sort_order, created_at, updated_at"
     )
     .eq("id", contentPillarId)
     .eq("user_id", userId)

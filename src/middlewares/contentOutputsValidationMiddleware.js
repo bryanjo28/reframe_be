@@ -17,6 +17,16 @@ function validateUuidParam(value) {
   );
 }
 
+function assertRequiredThreadType(threadType) {
+  if (!threadType) {
+    throw createHttpError("Missing required field: threadType", 400);
+  }
+
+  if (!["short", "long"].includes(threadType)) {
+    throw createHttpError("threadType must be either short or long", 400);
+  }
+}
+
 function validateCreateContentOutputRequest(req, res, next) {
   try {
     const contentOutputInput = normalizeContentOutputPayload(req.body);
@@ -44,6 +54,8 @@ function validateGenerateContentOutputRequest(req, res, next) {
       throw createHttpError("Missing required field: topicId", 400);
     }
 
+    assertRequiredThreadType(contentOutputInput.threadType);
+
     if (contentOutputInput.variantCount !== undefined && contentOutputInput.variantCount !== null) {
       if (!Number.isInteger(contentOutputInput.variantCount)) {
         throw createHttpError("variantCount must be an integer", 400);
@@ -68,6 +80,8 @@ function validateAutoGenerateContentOutputsRequest(req, res, next) {
     if (!contentOutputAutoGenerateInput.contentPillarId) {
       throw createHttpError("Missing required field: contentPillarId", 400);
     }
+
+    assertRequiredThreadType(contentOutputAutoGenerateInput.threadType);
 
     if (contentOutputAutoGenerateInput.targetCount === undefined || contentOutputAutoGenerateInput.targetCount === null) {
       throw createHttpError("Missing required field: targetCount", 400);
@@ -102,6 +116,8 @@ function validateScheduleAutoGenerateContentOutputsRequest(req, res, next) {
     if (!contentOutputAutoGenerateInput.contentPillarId) {
       throw createHttpError("Missing required field: contentPillarId", 400);
     }
+
+    assertRequiredThreadType(contentOutputAutoGenerateInput.threadType);
 
     if (
       contentOutputAutoGenerateInput.targetCount === undefined ||

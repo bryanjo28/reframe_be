@@ -1,10 +1,8 @@
 const contentPillarsService = require("../services/contentPillarsService");
 
-const devContentPillarStore = require("../store/devContentPillarStore");
-
 async function listContentPillars(req, res, next) {
   try {
-    const data = req.isDevAuth ? devContentPillarStore.list(req.user.id) : await contentPillarsService.listContentPillars({
+    const data = await contentPillarsService.listContentPillars({
       supabase: req.supabase,
       userId: req.user.id,
     });
@@ -21,7 +19,7 @@ async function listContentPillars(req, res, next) {
 
 async function getContentPillarById(req, res, next) {
   try {
-    const data = req.isDevAuth ? devContentPillarStore.get(req.user.id, req.params.id) : await contentPillarsService.getContentPillarById({
+    const data = await contentPillarsService.getContentPillarById({
       supabase: req.supabase,
       userId: req.user.id,
       id: req.params.id,
@@ -39,7 +37,7 @@ async function getContentPillarById(req, res, next) {
 
 async function createContentPillar(req, res, next) {
   try {
-    const data = req.isDevAuth ? devContentPillarStore.create(req.user.id, req.contentPillarInput || req.body) : await contentPillarsService.createContentPillar({
+    const data = await contentPillarsService.createContentPillar({
       supabase: req.supabase,
       userId: req.user.id,
       payload: req.contentPillarInput || req.body,
@@ -57,7 +55,7 @@ async function createContentPillar(req, res, next) {
 
 async function updateContentPillar(req, res, next) {
   try {
-    const data = req.isDevAuth ? devContentPillarStore.update(req.user.id, req.params.id, req.contentPillarInput || req.body) : await contentPillarsService.updateContentPillar({
+    const data = await contentPillarsService.updateContentPillar({
       supabase: req.supabase,
       userId: req.user.id,
       id: req.params.id,
@@ -76,7 +74,7 @@ async function updateContentPillar(req, res, next) {
 
 async function deleteContentPillar(req, res, next) {
   try {
-    const data = req.isDevAuth ? devContentPillarStore.remove(req.user.id, req.params.id) : await contentPillarsService.deleteContentPillar({
+    const data = await contentPillarsService.deleteContentPillar({
       supabase: req.supabase,
       userId: req.user.id,
       id: req.params.id,
