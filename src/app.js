@@ -3,8 +3,13 @@ const cors = require('cors');
 
 const apiRoutes = require('./routes');
 const errorHandler = require('./middlewares/errorHandler');
+const { globalApiLimiter } = require('./middlewares/rateLimiters');
 
 const app = express();
+
+if (process.env.NODE_ENV === "production") {
+  app.set("trust proxy", 1);
+}
 
 const allowedOrigins = [
   process.env.FRONTEND_URL || "http://localhost:5173",
@@ -35,7 +40,7 @@ app.get('/', (req, res) => {
   });
 });
 
-app.use('/api', apiRoutes);
+app.use('/api', globalApiLimiter, apiRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
