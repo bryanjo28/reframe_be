@@ -6,7 +6,7 @@
     "scripts": {
         "dev": "node --watch src/server.js",
         "start": "node src/server.js",
-        "test": "node test/run-tests.js && node test/securityConfig.test.js && node test/threadsTokenLifecycle.test.js && node test/threadsDeletion.test.js && node test/threadsScheduledCancellation.test.js"
+        "test": "node test/run-tests.js && node test/securityConfig.test.js && node test/threadsTokenLifecycle.test.js && node test/threadsDeletion.test.js && node test/threadsScheduledCancellation.test.js && node test/rateLimiters.test.js && node test/requestSizeLimit.test.js"
     },
     "keywords": [],
     "author": "",
