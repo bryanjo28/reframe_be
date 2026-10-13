@@ -43,10 +43,13 @@ run("normalizeContentPillarPayload ignores removed persisted fields", () => {
   const payload = normalizeContentPillarPayload({
     ai_enhanced_version: "legacy enhanced text",
     user_review_edit: "legacy review text",
+    affiliateLink: "https://example.com/camel",
+    affiliate_link: "https://example.com/snake",
   });
 
   assert.equal(Object.hasOwn(payload, "aiEnhancedVersion"), false);
   assert.equal(Object.hasOwn(payload, "userReviewEdit"), false);
+  assert.equal(Object.hasOwn(payload, "affiliateLink"), false);
 });
 
 run("validateCreateContentPillarRequest ignores legacy threadType", () => {
@@ -101,6 +104,7 @@ run("validateEnhanceContentPillarRequest accepts FE payload shape", () => {
   assert.equal(receivedError, undefined);
   assert.equal(req.contentPillarInput.pillarName, "Growth");
   assert.equal(req.contentPillarInput.personaConfigId, "persona-id");
+  assert.equal(Object.hasOwn(req.contentPillarInput, "affiliateLink"), false);
 });
 
 run("normalizeContentPillarPayload keeps null for explicit empty booleans", () => {

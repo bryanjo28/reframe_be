@@ -11,12 +11,13 @@ function normalizeBaseURL(baseURL) {
 function createSumoPodClient() {
   const apiKey = process.env.SUMO_API_KEY || "";
   const baseURL = normalizeBaseURL(process.env.SUMO_BASE_URL || "");
+  const model = process.env.SUMO_MODEL || "";
 
-  if (!apiKey || !baseURL) {
-    const error = new Error("SUMO_API_KEY dan SUMO_BASE_URL harus diisi");
+  if (!apiKey || !baseURL || !model) {
+    const error = new Error("SUMO_API_KEY, SUMO_BASE_URL, dan SUMO_MODEL harus diisi");
     error.status = 400;
     error.details = {
-      requiredEnv: ["SUMO_API_KEY", "SUMO_BASE_URL"],
+      requiredEnv: ["SUMO_API_KEY", "SUMO_BASE_URL", "SUMO_MODEL"],
     };
     throw error;
   }
@@ -29,11 +30,11 @@ function createSumoPodClient() {
 
 async function generateChatCompletion({
   messages,
-  model = "gpt-5-mini",
   maxTokens = 10000,
   temperature = 0.3,
 }) {
   const openai = createSumoPodClient();
+  const model = process.env.SUMO_MODEL;
 
   const response = await openai.chat.completions.create({
     model,
@@ -52,12 +53,14 @@ async function generateChatCompletion({
 function getSumoPodConfigStatus() {
   const apiKey = process.env.SUMO_API_KEY || "";
   const baseURL = process.env.SUMO_BASE_URL || "";
+  const model = process.env.SUMO_MODEL || "";
 
   return {
-    configured: Boolean(apiKey && baseURL),
+    configured: Boolean(apiKey && baseURL && model),
     hasApiKey: Boolean(apiKey),
     hasBaseUrl: Boolean(baseURL),
     baseURL: normalizeBaseURL(baseURL),
+    model,
   };
 }
 

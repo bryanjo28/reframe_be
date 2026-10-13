@@ -6,6 +6,7 @@
   supabase,
   supabaseAdmin,
 } = require("../config/supabase");
+const { isDisposable } = require("detect-disposable-email");
 
 function createHttpError(message, status = 500, details, code = "AUTH_SERVICE_ERROR") {
   const error = new Error(message);
@@ -92,6 +93,30 @@ function normalizeOptionalText(value) {
   const text = normalizeText(value);
 
   return text.length > 0 ? text : null;
+}
+
+function getBlockedEmailDomains() {
+  return String(process.env.BLOCKED_EMAIL_DOMAINS || "")
+    .split(",")
+    .map((domain) => domain.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function assertAllowedRegistrationEmail(email) {
+  const normalizedEmail = normalizeText(email).toLowerCase();
+  const domain = normalizedEmail.split("@").at(-1) || "";
+  const blockedByConfig = getBlockedEmailDomains().some(
+    (blockedDomain) => domain === blockedDomain || domain.endsWith(`.${blockedDomain}`)
+  );
+
+  if (isDisposable(normalizedEmail) || blockedByConfig) {
+    throw createHttpError(
+      "Disposable or temporary email addresses are not allowed",
+      400,
+      undefined,
+      "DISPOSABLE_EMAIL_NOT_ALLOWED"
+    );
+  }
 }
 
 function normalizeAuthPayload(payload = {}) {
@@ -608,6 +633,7 @@ async function register(
   });
 
   assertRequiredAuthFields(normalizedInput, ["email", "password", "accountName"]);
+  assertAllowedRegistrationEmail(normalizedInput.email);
   await accountNameChecker(normalizedInput.accountName, adminClient);
   await freePlanLoader();
 
@@ -955,6 +981,7 @@ async function logout({ supabase }) {
 
 module.exports = {
   assertAccountNameAvailable,
+  assertAllowedRegistrationEmail,
   assertEmailConfirmed,
   assertRequiredAuthFields,
   changePassword,

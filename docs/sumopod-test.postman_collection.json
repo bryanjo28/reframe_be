@@ -30,7 +30,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"prompt\": \"Say hello in a creative way\",\n  \"model\": \"gemini-2.5-flash-lite\",\n  \"maxTokens\": 150,\n  \"temperature\": 0.5,\n  \"systemPrompt\": \"You are a helpful assistant that answers clearly and concisely in Bahasa Indonesia.\"\n}"
+          "raw": "{\n  \"prompt\": \"Say hello in a creative way\",\n  \"maxTokens\": 150,\n  \"temperature\": 0.5,\n  \"systemPrompt\": \"You are a helpful assistant that answers clearly and concisely in Bahasa Indonesia.\"\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/api/sumopod/test",

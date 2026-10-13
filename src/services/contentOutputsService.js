@@ -576,7 +576,6 @@ function buildContentOutputUserPrompt({
     `- Audience Segment: ${contentPillar?.audienceSegment || promptContext.pillarAudienceSegment || "-"}`,
     `- Key Message: ${contentPillar?.keyMessage || promptContext.pillarKeyMessage || "-"}`,
     `- CTA Direction: ${contentPillar?.ctaDirection || promptContext.pillarCtaDirection || "-"}`,
-    `- CTA Link / Affiliate: ${contentPillar?.affiliateLink || promptContext.pillarAffiliateLink || "-"}`,
     "",
     sourceContentOutput?.content
       ? [
@@ -982,7 +981,6 @@ function buildPromptContext({ persona, topic, contentPillar, sourceContentOutput
     pillarAudienceSegment: contentPillar?.audienceSegment || "",
     pillarKeyMessage: contentPillar?.keyMessage || "",
     pillarCtaDirection: contentPillar?.ctaDirection || "",
-    pillarAffiliateLink: contentPillar?.affiliateLink || "",
     threadType: input.threadType || "short",
     category: topic?.category || "",
     topic: topic?.topic || "",
@@ -1226,7 +1224,6 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
     });
 
     const aiResult = await sumopodService.generateChatCompletion({
-      model: workingInput.model || "gpt-4o-mini",
       maxTokens: workingInput.maxTokens || 1200,
       temperature: workingInput.temperature || 0.5,
       messages: [
@@ -1778,7 +1775,6 @@ async function generateContentOutputDemo({ supabase, userId, payload }) {
   });
 
   const aiResult = await sumopodService.generateChatCompletion({
-    model: "gpt-4o-mini",
     maxTokens: 1200,
     temperature: 0.8,
     messages: [

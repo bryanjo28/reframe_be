@@ -75,6 +75,68 @@ run("validateRegisterRequest normalizes request body and allows snake_case input
   });
 });
 
+run("validateRegisterRequest rejects disposable email domains", () => {
+  const req = {
+    body: {
+      email: "user@mailinator.com",
+      password: "secret123",
+      accountName: "alpha",
+    },
+  };
+  let receivedError = null;
+
+  validateRegisterRequest(req, {}, (error) => {
+    receivedError = error;
+  });
+
+  assert.ok(receivedError);
+  assert.equal(receivedError.status, 400);
+  assert.equal(receivedError.code, "DISPOSABLE_EMAIL_NOT_ALLOWED");
+});
+
+run("validateRegisterRequest allows permanent Yahoo email", () => {
+  const req = {
+    body: {
+      email: "user@yahoo.com",
+      password: "secret123",
+      accountName: "alpha",
+    },
+  };
+  let receivedError = null;
+
+  validateRegisterRequest(req, {}, (error) => {
+    receivedError = error;
+  });
+
+  assert.equal(receivedError, undefined);
+  assert.equal(req.authInput.email, "user@yahoo.com");
+});
+
+run("validateRegisterRequest rejects domains configured through env", () => {
+  const previousValue = process.env.BLOCKED_EMAIL_DOMAINS;
+  process.env.BLOCKED_EMAIL_DOMAINS = "blocked.example";
+  const req = {
+    body: {
+      email: "user@sub.blocked.example",
+      password: "secret123",
+      accountName: "alpha",
+    },
+  };
+  let receivedError = null;
+
+  try {
+    validateRegisterRequest(req, {}, (error) => {
+      receivedError = error;
+    });
+  } finally {
+    if (previousValue === undefined) delete process.env.BLOCKED_EMAIL_DOMAINS;
+    else process.env.BLOCKED_EMAIL_DOMAINS = previousValue;
+  }
+
+  assert.ok(receivedError);
+  assert.equal(receivedError.code, "DISPOSABLE_EMAIL_NOT_ALLOWED");
+});
+
 run("validateLoginRequest rejects empty credentials", () => {
   const req = {
     body: {

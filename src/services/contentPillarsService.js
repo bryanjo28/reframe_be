@@ -89,7 +89,6 @@ function normalizeContentPillarPayload(payload = {}) {
     audienceSegment: readOptionalText(source, ["audienceSegment", "audience_segment"]),
     keyMessage: readOptionalText(source, ["keyMessage", "key_message"]),
     ctaDirection: readOptionalText(source, ["ctaDirection", "cta_direction"]),
-    affiliateLink: readOptionalText(source, ["affiliateLink", "affiliate_link"]),
     isActive: readOptionalBoolean(source, ["isActive", "is_active"]),
     sortOrder: readOptionalNumber(source, ["sortOrder", "sort_order"]),
   };
@@ -177,7 +176,6 @@ function mapContentPillarRow(row, relations = {}) {
     audienceSegment: row.audience_segment,
     keyMessage: row.key_message,
     ctaDirection: row.cta_direction,
-    affiliateLink: row.affiliate_link,
     isActive: row.is_active,
     sortOrder: row.sort_order,
     createdAt: row.created_at,
@@ -209,7 +207,6 @@ function buildContentPillarEnhancementPrompt(contentPillar, personaConfig = null
     `- Audience Segment: ${contentPillar.audienceSegment || "-"}`,
     `- Key Message: ${contentPillar.keyMessage || "-"}`,
     `- CTA Direction: ${contentPillar.ctaDirection || "-"}`,
-    `- Affiliate Link: ${contentPillar.affiliateLink || "-"}`,
     "",
     "Persona config:",
     `- Persona: ${personaConfig?.persona || "-"}`,
@@ -249,7 +246,6 @@ function logContentPillarEnhancementDebug({
   personaConfig,
   contentPillar,
   prompt,
-  model,
   maxTokens,
   temperature,
 }) {
@@ -261,7 +257,6 @@ function logContentPillarEnhancementDebug({
     "[content-pillars.enhance] debug",
     JSON.stringify(
       {
-        model,
         maxTokens,
         temperature,
         enhancementInput,
@@ -300,10 +295,6 @@ function buildInsertPayload({ userId, input }) {
 
   if (input.ctaDirection !== undefined) {
     payload.cta_direction = input.ctaDirection;
-  }
-
-  if (input.affiliateLink !== undefined) {
-    payload.affiliate_link = input.affiliateLink;
   }
 
   if (input.isActive !== undefined && input.isActive !== null) {
@@ -348,10 +339,6 @@ function buildUpdatePayload(input) {
     payload.cta_direction = input.ctaDirection;
   }
 
-  if (input.affiliateLink !== undefined) {
-    payload.affiliate_link = input.affiliateLink;
-  }
-
   if (input.isActive !== undefined && input.isActive !== null) {
     payload.is_active = input.isActive;
   }
@@ -394,7 +381,7 @@ async function assertContentPillarBelongsToUserAndPersona({
 
   const { data, error } = await supabase
     .from("content_pillars")
-    .select("id, user_id, persona_config_id, pillar_name, template_content, target_objective, audience_segment, key_message, cta_direction, affiliate_link, is_active, sort_order, created_at, updated_at")
+    .select("id, user_id, persona_config_id, pillar_name, template_content, target_objective, audience_segment, key_message, cta_direction, is_active, sort_order, created_at, updated_at")
     .eq("id", contentPillarId)
     .eq("user_id", userId)
     .maybeSingle();
@@ -686,7 +673,6 @@ async function enhanceContentPillarWithAi({
   userId,
   id,
   input,
-  model = "gemini-2.5-flash-lite",
   maxTokens = 350,
   temperature = 0.5,
   systemPrompt = "You are a helpful assistant that rewrites marketing strategy inputs into a polished, concise, and coherent Indonesian paragraph.",
@@ -728,13 +714,11 @@ async function enhanceContentPillarWithAi({
     personaConfig,
     contentPillar,
     prompt,
-    model,
     maxTokens,
     temperature,
   });
 
   const result = await sumopodService.generateChatCompletion({
-    model,
     maxTokens,
     temperature,
     messages: [
