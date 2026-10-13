@@ -5,6 +5,7 @@ require("dotenv").config();
 const {
   disconnectThreadsAccount,
   getThreadsAccount,
+  saveThreadsAccount,
 } = require("../src/services/threadsAccountsService");
 const credentialsRepository = require("../src/repositories/socialAccountCredentialsRepository");
 
@@ -19,7 +20,7 @@ function run(name, fn) {
     });
 }
 
-function createSupabase({ existingRow = null, updateError = null }) {
+function createSupabase({ existingRow = null, updateError = null, events = [] }) {
   return {
     from(table) {
       assert.equal(table, "social_accounts");
@@ -39,6 +40,7 @@ function createSupabase({ existingRow = null, updateError = null }) {
           return selectQuery;
         },
         update() {
+          events.push("metadata-update");
           const updateQuery = {
             eq() {
               return updateQuery;
@@ -51,6 +53,23 @@ function createSupabase({ existingRow = null, updateError = null }) {
           return updateQuery;
         },
       };
+    },
+  };
+}
+
+function createCredentialSupabase({ deleteError = null, events = [] } = {}) {
+  return {
+    from(table) {
+      assert.equal(table, "social_account_credentials");
+      const query = {
+        delete() {
+          events.push("credential-delete");
+          return query;
+        },
+        eq() { return query; },
+        then(resolve) { return Promise.resolve({ data: null, error: deleteError }).then(resolve); },
+      };
+      return query;
     },
   };
 }
@@ -70,6 +89,7 @@ run("disconnectThreadsAccount returns a stable code when account is missing", as
 });
 
 run("disconnectThreadsAccount returns a stable code when token cleanup fails", async () => {
+  const events = [];
   await assert.rejects(
     disconnectThreadsAccount({
       supabase: createSupabase({
@@ -77,9 +97,12 @@ run("disconnectThreadsAccount returns a stable code when token cleanup fails", a
           id: "account-1",
           user_id: "user-1",
           platform: "threads",
-          access_token: "token",
         },
-        updateError: { message: "database update failed" },
+        events,
+      }),
+      credentialSupabase: createCredentialSupabase({
+        deleteError: { message: "database delete failed" },
+        events,
       }),
       userId: "user-1",
     }),
@@ -89,6 +112,24 @@ run("disconnectThreadsAccount returns a stable code when token cleanup fails", a
       message: "Failed to disconnect Threads account",
     }
   );
+  assert.deepEqual(events, ["metadata-update", "credential-delete"]);
+});
+
+run("disconnect does not delete credentials when metadata cannot be marked disconnected", async () => {
+  const events = [];
+  await assert.rejects(
+    disconnectThreadsAccount({
+      supabase: createSupabase({
+        existingRow: { id: "account-1", user_id: "user-1", platform: "threads" },
+        updateError: { message: "database update failed" },
+        events,
+      }),
+      credentialSupabase: createCredentialSupabase({ events }),
+      userId: "user-1",
+    }),
+    { code: "THREADS_DISCONNECT_FAILED" }
+  );
+  assert.deepEqual(events, ["metadata-update"]);
 });
 
 run("disconnectThreadsAccount returns a stable code when the service is unavailable", async () => {
@@ -202,4 +243,52 @@ run("internal credential reads fail closed without a service-role client", async
       code: "THREADS_CREDENTIALS_UNAVAILABLE",
     }
   );
+});
+
+run("existing account metadata is not changed when credential rotation fails", async () => {
+  const events = [];
+  const metadataSupabase = {
+    from(table) {
+      assert.equal(table, "social_accounts");
+      const selectQuery = {
+        select() { return selectQuery; },
+        eq() { return selectQuery; },
+        maybeSingle: async () => ({
+          data: { id: "account-1", user_id: "user-1", platform: "threads" },
+          error: null,
+        }),
+      };
+      return {
+        select() { return selectQuery; },
+        update() {
+          events.push("metadata-update");
+          throw new Error("metadata must not update after credential failure");
+        },
+      };
+    },
+  };
+  const credentialSupabase = {
+    from(table) {
+      assert.equal(table, "social_account_credentials");
+      const query = {
+        upsert() { events.push("credential-upsert"); return query; },
+        select() { return query; },
+        single: async () => ({ data: null, error: { message: "credential write failed" } }),
+      };
+      return query;
+    },
+  };
+
+  await assert.rejects(saveThreadsAccount({
+    supabase: metadataSupabase,
+    credentialSupabase,
+    userId: "user-1",
+    payload: {
+      accessToken: "new-token",
+      accountId: "account",
+      threadsId: "threads-1",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    },
+  }), { code: "THREADS_CREDENTIALS_ERROR" });
+  assert.deepEqual(events, ["credential-upsert"]);
 });

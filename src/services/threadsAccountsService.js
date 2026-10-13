@@ -142,6 +142,13 @@ async function saveThreadsAccount({
   }
 
   if (existingAccount) {
+    await credentialsRepository.upsert({
+      supabase: credentialSupabase,
+      socialAccountId: existingAccount.id,
+      accessToken: input.accessToken,
+      refreshToken: input.refreshToken,
+    });
+
     const { data, error } = await supabase
       .from("social_accounts")
       .update(buildUpdatePayload(input))
@@ -154,12 +161,6 @@ async function saveThreadsAccount({
       throw createHttpError(error.message, 400, error);
     }
 
-    await credentialsRepository.upsert({
-      supabase: credentialSupabase,
-      socialAccountId: data.id,
-      accessToken: input.accessToken,
-      refreshToken: input.refreshToken,
-    });
     const account = mapThreadsAccountRow(data);
     return includeCredentials ? { ...account, accessToken: input.accessToken, refreshToken: input.refreshToken } : account;
   }
@@ -248,15 +249,6 @@ async function disconnectThreadsAccount({ supabase, credentialSupabase = supabas
     );
   }
 
-  try {
-    await credentialsRepository.deleteBySocialAccountId({
-      supabase: credentialSupabase,
-      socialAccountId: existingAccount.id,
-    });
-  } catch (error) {
-    throw createHttpError("Failed to disconnect Threads account", 400, error, "THREADS_DISCONNECT_FAILED");
-  }
-
   const { data, error } = await supabase
     .from("social_accounts")
     .update({
@@ -272,6 +264,20 @@ async function disconnectThreadsAccount({ supabase, credentialSupabase = supabas
       "Failed to disconnect Threads account",
       400,
       error,
+      "THREADS_DISCONNECT_FAILED"
+    );
+  }
+
+  try {
+    await credentialsRepository.deleteBySocialAccountId({
+      supabase: credentialSupabase,
+      socialAccountId: existingAccount.id,
+    });
+  } catch (credentialError) {
+    throw createHttpError(
+      "Failed to disconnect Threads account",
+      400,
+      credentialError,
       "THREADS_DISCONNECT_FAILED"
     );
   }
