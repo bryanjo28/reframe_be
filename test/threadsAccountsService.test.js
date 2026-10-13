@@ -6,6 +6,7 @@ const {
   disconnectThreadsAccount,
   getThreadsAccount,
 } = require("../src/services/threadsAccountsService");
+const credentialsRepository = require("../src/repositories/socialAccountCredentialsRepository");
 
 function run(name, fn) {
   return Promise.resolve()
@@ -122,4 +123,83 @@ run("getThreadsAccount does not expose provider credentials by default", async (
   assert.equal(account.threadsId, "threads-1");
   assert.equal(Object.hasOwn(account, "accessToken"), false);
   assert.equal(Object.hasOwn(account, "refreshToken"), false);
+});
+
+run("credential repository reads only the private table through the supplied admin client", async () => {
+  const calls = [];
+  const credentialSupabase = {
+    from(table) {
+      calls.push(table);
+      assert.equal(table, "social_account_credentials");
+      const query = {
+        select(columns) {
+          assert.equal(columns, "access_token, refresh_token");
+          return query;
+        },
+        eq(column, value) {
+          assert.equal(column, "social_account_id");
+          assert.equal(value, "account-1");
+          return query;
+        },
+        maybeSingle: async () => ({
+          data: { access_token: "private-token", refresh_token: "private-refresh" },
+          error: null,
+        }),
+      };
+      return query;
+    },
+  };
+
+  const credentials = await credentialsRepository.getBySocialAccountId({
+    supabase: credentialSupabase,
+    socialAccountId: "account-1",
+  });
+
+  assert.deepEqual(credentials, {
+    accessToken: "private-token",
+    refreshToken: "private-refresh",
+  });
+  assert.deepEqual(calls, ["social_account_credentials"]);
+});
+
+run("internal credential reads verify account ownership first", async () => {
+  let credentialReads = 0;
+  const credentialSupabase = {
+    from() {
+      credentialReads += 1;
+      throw new Error("credential lookup must not run");
+    },
+  };
+
+  const account = await getThreadsAccount({
+    supabase: createSupabase({ existingRow: null }),
+    credentialSupabase,
+    userId: "user-1",
+    includeCredentials: true,
+  });
+
+  assert.equal(account, null);
+  assert.equal(credentialReads, 0);
+});
+
+run("internal credential reads fail closed without a service-role client", async () => {
+  await assert.rejects(
+    getThreadsAccount({
+      supabase: createSupabase({
+        existingRow: {
+          id: "account-1",
+          user_id: "user-1",
+          platform: "threads",
+          expires_at: "2026-12-01T00:00:00.000Z",
+        },
+      }),
+      credentialSupabase: null,
+      userId: "user-1",
+      includeCredentials: true,
+    }),
+    {
+      status: 500,
+      code: "THREADS_CREDENTIALS_UNAVAILABLE",
+    }
+  );
 });

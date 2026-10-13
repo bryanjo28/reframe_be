@@ -1,6 +1,7 @@
 const threadsAccountsService = require("./threadsAccountsService");
 const threadsAuthService = require("./threadsAuthService");
 const scheduledJobsService = require("./scheduledJobsService");
+const { supabaseAdmin } = require("../config/supabase");
 const { performance } = require("node:perf_hooks");
 const {
   createScheduledJobRun,
@@ -353,9 +354,10 @@ function getPublishedPostUrl({ username, postId, responseData }) {
   return `https://www.threads.net/@${username}/post/${postId}`;
 }
 
-async function ensureFreshThreadsAccount({ supabase, userId }) {
+async function ensureFreshThreadsAccount({ supabase, credentialSupabase = supabaseAdmin, userId }) {
   const account = await threadsAccountsService.getThreadsAccount({
     supabase,
+    credentialSupabase,
     userId,
     includeCredentials: true,
   });
@@ -413,6 +415,7 @@ async function ensureFreshThreadsAccount({ supabase, userId }) {
 
   return threadsAccountsService.saveThreadsAccount({
     supabase,
+    credentialSupabase,
     userId,
     payload: {
       accessToken: activeAccessToken,
@@ -1194,8 +1197,8 @@ async function markContentOutputPublished({
   };
 }
 
-async function publishSingleDraft({ supabase, userId, contentOutput }) {
-  const account = await ensureFreshThreadsAccount({ supabase, userId });
+async function publishSingleDraft({ supabase, credentialSupabase = supabaseAdmin, userId, contentOutput }) {
+  const account = await ensureFreshThreadsAccount({ supabase, credentialSupabase, userId });
 
   if (!contentOutput.content || String(contentOutput.content).trim().length === 0) {
     throw createHttpError("Content output content is empty", 400);
@@ -1455,7 +1458,7 @@ async function assertScheduledThreadsJobRunning({ supabase, userId, scheduledJob
   }
 }
 
-async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit = 20, force = false }) {
+async function runScheduledThreadsJob({ supabase, credentialSupabase = supabaseAdmin, userId, scheduledJobId, limit = 20, force = false }) {
   const nowIso = new Date().toISOString();
   const jobsFetchLimit = Number.isInteger(limit) ? limit : 20;
 
@@ -1688,7 +1691,7 @@ async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit 
 
         try {
           console.log("[runScheduledThreadsJob] publishing content_output:", claimedRow.id);
-          const account = await ensureFreshThreadsAccount({ supabase, userId });
+          const account = await ensureFreshThreadsAccount({ supabase, credentialSupabase, userId });
           console.log("[runScheduledThreadsJob] threads account:", { id: account.id, threadsId: account.threadsId, hasToken: !!account.accessToken });
           const publication = await publishAndPersistThreadChain({
             supabase,

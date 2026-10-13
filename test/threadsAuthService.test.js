@@ -116,6 +116,8 @@ async function main() {
       const result = await freshThreadsAuthService.handleCallback({
         code: "test_code_123",
         state: connect.state,
+      }, {
+        persistAccount: async (input) => ({ storage: "database", tokenRecord: input }),
       });
 
       assert.equal(result.userId, userId);
@@ -124,11 +126,10 @@ async function main() {
       assert.equal(result.threadsUserId, "threads_user_123");
       assert.equal(result.threadsUsername, "testuser");
       assert.ok(result.tokenRecord);
-      assert.equal(result.storage, "memory");
+      assert.equal(result.storage, "database");
       assert.equal(result.tokenRecord.userId, userId);
-      assert.equal(result.tokenRecord.provider, "threads");
       assert.equal(result.tokenRecord.accessToken, "long_lived_test_token");
-      assert.equal(result.tokenRecord.threadsUserId, "threads_user_123");
+      assert.equal(result.tokenRecord.threadsUser.id, "threads_user_123");
     } finally {
       process.env.SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey;
       loadFreshThreadsAuthService();
@@ -151,12 +152,14 @@ async function main() {
       const result = await reloadedThreadsAuthService.handleCallback({
         code: "test_code_456",
         state: connect.state,
+      }, {
+        persistAccount: async (input) => ({ storage: "database", tokenRecord: input }),
       });
 
       assert.equal(result.userId, userId);
       assert.equal(result.provider, "threads");
       assert.equal(result.accessTokenStored, true);
-      assert.equal(result.storage, "memory");
+      assert.equal(result.storage, "database");
     } finally {
       process.env.SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey;
       loadFreshThreadsAuthService();

@@ -3,7 +3,6 @@ const crypto = require("crypto");
 const threadsConfig = require("../config/threads");
 const { isSupabaseAdminConfigured, supabaseAdmin } = require("../config/supabase");
 const threadsAccountsService = require("./threadsAccountsService");
-const threadsTokenRepository = require("../repositories/threadsTokenRepository");
 const oauthStateStore = require("../store/oauthStateStore");
 
 const THREADS_API_BASE = "https://graph.threads.net";
@@ -264,33 +263,19 @@ async function saveThreadsAccount({
     expiresAt: normalizeExpiry(expiresIn),
   };
 
-  if (isSupabaseAdminConfigured && supabaseAdmin) {
-    const tokenRecord = await threadsAccountsService.saveThreadsAccount({
-      supabase: supabaseAdmin,
-      userId,
-      payload,
-    });
-
-    return {
-      storage: "database",
-      tokenRecord,
-    };
+  if (!isSupabaseAdminConfigured || !supabaseAdmin) {
+    throw createHttpError("SUPABASE_SERVICE_ROLE_KEY is required to store Threads credentials", 500);
   }
 
-  const tokenRecord = await threadsTokenRepository.save({
+  const tokenRecord = await threadsAccountsService.saveThreadsAccount({
+    supabase: supabaseAdmin,
+    credentialSupabase: supabaseAdmin,
     userId,
-    provider: "threads",
-    threadsUserId: threadsUser.id,
-    username: getDisplayUsername(threadsUser),
-    accessToken,
-    refreshToken: refreshToken || null,
-    expiresAt: normalizeExpiry(expiresIn),
-    tokenType: "Bearer",
-    scope: threadsConfig.scopes.split(",").map((scope) => scope.trim()).filter(Boolean),
+    payload,
   });
 
   return {
-    storage: "memory",
+    storage: "database",
     tokenRecord,
   };
 }
@@ -324,7 +309,7 @@ function createAuthorizationRequest({ userId }) {
   };
 }
 
-async function handleCallback({ code, state }) {
+async function handleCallback({ code, state }, dependencies = {}) {
   if (!code) {
     throw createHttpError("Missing OAuth code", 400);
   }
@@ -353,13 +338,14 @@ async function handleCallback({ code, state }) {
   const activeExpiresIn = longLivedToken.expiresIn || shortLivedToken.expiresIn;
 
   const threadsUser = await getThreadsUser(activeAccessToken);
-  const persisted = await saveThreadsAccount({
-    userId: verifiedSession.userId,
-    accessToken: activeAccessToken,
-    refreshToken: activeRefreshToken,
-    expiresIn: activeExpiresIn,
-    threadsUser,
-  });
+  const persistAccount = dependencies.persistAccount || saveThreadsAccount;
+  const persisted = await persistAccount({
+      userId: verifiedSession.userId,
+      accessToken: activeAccessToken,
+      refreshToken: activeRefreshToken,
+      expiresIn: activeExpiresIn,
+      threadsUser,
+    });
 
   return {
     userId: verifiedSession.userId,

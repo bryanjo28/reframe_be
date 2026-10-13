@@ -1,7 +1,6 @@
 const crypto = require("crypto");
 const threadsConfig = require("../config/threads");
 const supabaseConfig = require("../config/supabase");
-const threadsTokenRepository = require("../repositories/threadsTokenRepository");
 
 function httpError(message, status) {
   const error = new Error(message);
@@ -137,8 +136,6 @@ async function deleteThreadsData(signedRequest) {
         .eq("platform_user_id", threadsUserId).in("id", batch));
     });
   }
-  await threadsTokenRepository.deleteByThreadsUserId(threadsUserId);
-
   // Issue a verifiable completion receipt only after every deletion succeeds.
   const nonce = crypto.randomBytes(16).toString("hex");
   const confirmationCode = nonce + signReceipt(nonce);

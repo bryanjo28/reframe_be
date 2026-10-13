@@ -1,4 +1,5 @@
-const { isSupabaseConfigured } = require("../config/supabase");
+const { isSupabaseConfigured, supabaseAdmin } = require("../config/supabase");
+const credentialsRepository = require("../repositories/socialAccountCredentialsRepository");
 
 function createHttpError(message, status = 500, details, code) {
   const error = new Error(message);
@@ -65,7 +66,7 @@ function assertCreateThreadsAccountPayload(payload) {
   }
 }
 
-function mapThreadsAccountRow(row, { includeCredentials = false } = {}) {
+function mapThreadsAccountRow(row) {
   if (!row) {
     return null;
   }
@@ -80,11 +81,6 @@ function mapThreadsAccountRow(row, { includeCredentials = false } = {}) {
     createdAt: row.created_at,
   };
 
-  if (includeCredentials) {
-    account.accessToken = row.access_token;
-    account.refreshToken = row.refresh_token;
-  }
-
   return account;
 }
 
@@ -92,14 +88,9 @@ function buildInsertPayload({ userId, input }) {
   const payload = {
     user_id: userId,
     platform: "threads",
-    access_token: input.accessToken,
     platform_user_id: input.threadsId,
     username: input.accountId,
   };
-
-  if (input.refreshToken !== undefined) {
-    payload.refresh_token = input.refreshToken;
-  }
 
   if (input.expiresAt !== undefined) {
     payload.expires_at = input.expiresAt;
@@ -110,15 +101,10 @@ function buildInsertPayload({ userId, input }) {
 
 function buildUpdatePayload(input) {
   const payload = {
-    access_token: input.accessToken,
     platform: "threads",
     platform_user_id: input.threadsId,
     username: input.accountId,
   };
-
-  if (input.refreshToken !== undefined) {
-    payload.refresh_token = input.refreshToken;
-  }
 
   if (input.expiresAt !== undefined) {
     payload.expires_at = input.expiresAt;
@@ -127,7 +113,13 @@ function buildUpdatePayload(input) {
   return payload;
 }
 
-async function saveThreadsAccount({ supabase, userId, payload, includeCredentials = false }) {
+async function saveThreadsAccount({
+  supabase,
+  credentialSupabase = supabaseAdmin,
+  userId,
+  payload,
+  includeCredentials = false,
+}) {
   if (!isSupabaseConfigured || !supabase) {
     throw createHttpError(
       "Supabase is not configured. Fill SUPABASE_URL and SUPABASE_ANON_KEY first.",
@@ -162,7 +154,14 @@ async function saveThreadsAccount({ supabase, userId, payload, includeCredential
       throw createHttpError(error.message, 400, error);
     }
 
-    return mapThreadsAccountRow(data, { includeCredentials });
+    await credentialsRepository.upsert({
+      supabase: credentialSupabase,
+      socialAccountId: data.id,
+      accessToken: input.accessToken,
+      refreshToken: input.refreshToken,
+    });
+    const account = mapThreadsAccountRow(data);
+    return includeCredentials ? { ...account, accessToken: input.accessToken, refreshToken: input.refreshToken } : account;
   }
 
   const { data, error } = await supabase
@@ -175,10 +174,27 @@ async function saveThreadsAccount({ supabase, userId, payload, includeCredential
     throw createHttpError(error.message, 400, error);
   }
 
-  return mapThreadsAccountRow(data, { includeCredentials });
+  try {
+    await credentialsRepository.upsert({
+      supabase: credentialSupabase,
+      socialAccountId: data.id,
+      accessToken: input.accessToken,
+      refreshToken: input.refreshToken,
+    });
+  } catch (credentialError) {
+    await supabase.from("social_accounts").delete().eq("id", data.id).eq("user_id", userId);
+    throw credentialError;
+  }
+  const account = mapThreadsAccountRow(data);
+  return includeCredentials ? { ...account, accessToken: input.accessToken, refreshToken: input.refreshToken } : account;
 }
 
-async function getThreadsAccount({ supabase, userId, includeCredentials = false }) {
+async function getThreadsAccount({
+  supabase,
+  credentialSupabase = supabaseAdmin,
+  userId,
+  includeCredentials = false,
+}) {
   if (!isSupabaseConfigured || !supabase) {
     throw createHttpError(
       "Supabase is not configured. Fill SUPABASE_URL and SUPABASE_ANON_KEY first.",
@@ -202,10 +218,16 @@ async function getThreadsAccount({ supabase, userId, includeCredentials = false 
     );
   }
 
-  return mapThreadsAccountRow(data, { includeCredentials });
+  const account = mapThreadsAccountRow(data);
+  if (!account || !includeCredentials) return account;
+  const credentials = await credentialsRepository.getBySocialAccountId({
+    supabase: credentialSupabase,
+    socialAccountId: account.id,
+  });
+  return credentials ? { ...account, ...credentials } : account;
 }
 
-async function disconnectThreadsAccount({ supabase, userId }) {
+async function disconnectThreadsAccount({ supabase, credentialSupabase = supabaseAdmin, userId }) {
   if (!isSupabaseConfigured || !supabase) {
     throw createHttpError(
       "Threads service is not configured",
@@ -226,11 +248,18 @@ async function disconnectThreadsAccount({ supabase, userId }) {
     );
   }
 
+  try {
+    await credentialsRepository.deleteBySocialAccountId({
+      supabase: credentialSupabase,
+      socialAccountId: existingAccount.id,
+    });
+  } catch (error) {
+    throw createHttpError("Failed to disconnect Threads account", 400, error, "THREADS_DISCONNECT_FAILED");
+  }
+
   const { data, error } = await supabase
     .from("social_accounts")
     .update({
-      access_token: null,
-      refresh_token: null,
       expires_at: null,
     })
     .eq("id", existingAccount.id)

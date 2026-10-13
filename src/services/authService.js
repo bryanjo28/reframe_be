@@ -169,24 +169,7 @@ function buildThreadsConnectionStatus(row) {
     };
   }
 
-  const accessToken = typeof row.access_token === "string" ? row.access_token.trim() : row.access_token;
   const expiresAt = row.expires_at || null;
-
-  if (!accessToken) {
-    return {
-      connected: false,
-      canUseToken: false,
-      needsReconnect: false,
-      status: "disconnected",
-      reason: "Threads account is disconnected.",
-      accountId: row.username || null,
-      threadsId: row.platform_user_id || null,
-      expiresAt,
-      remainingSeconds: 0,
-      updatedAt: row.updated_at || null,
-      checkedAt: nowIso,
-    };
-  }
 
   if (!expiresAt) {
     return {
@@ -256,7 +239,7 @@ async function getThreadsConnectionStatus({ supabase, userId }) {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const { data, error } = await supabase
       .from("social_accounts")
-      .select("access_token, username, platform_user_id, expires_at, updated_at")
+      .select("username, platform_user_id, expires_at, updated_at")
       .eq("user_id", userId)
       .eq("platform", "threads")
       .maybeSingle();

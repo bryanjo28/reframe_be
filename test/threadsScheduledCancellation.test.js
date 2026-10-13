@@ -48,7 +48,8 @@ async function runScenario(cancellationStage) {
   const rows = {
     scheduled_jobs: [{ id: "job-1", user_id: "user-1", status: "active", job_type: "threads_auto_post", target_count: 2 }],
     content_outputs: [1, 2].map((index) => ({ id: `output-${index}`, user_id: "user-1", status: "approved", platform: "threads", content: `Post ${index}`, thread_type: "short", publish_scheduled_job_id: "job-1", publish_scheduled_job_run_id: null })),
-    social_accounts: [{ id: "account-1", user_id: "user-1", platform: "threads", access_token: "test-token", platform_user_id: "threads-1", username: "user", expires_at: "2099-01-01T00:00:00Z" }],
+    social_accounts: [{ id: "account-1", user_id: "user-1", platform: "threads", platform_user_id: "threads-1", username: "user", expires_at: "2099-01-01T00:00:00Z" }],
+    social_account_credentials: [{ social_account_id: "account-1", access_token: "test-token", refresh_token: null }],
     published_posts: [],
     scheduled_job_runs: [],
   };
@@ -71,12 +72,14 @@ async function runScenario(cancellationStage) {
     throw new Error(`Unexpected API call: ${pathname}`);
   };
   try {
-    const result = await runScheduledThreadsJob({
-      supabase: database(rows, (table, payload) => {
+    const userSupabase = database(rows, (table, payload) => {
         if (cancellationStage && ((table === "scheduled_job_runs" && payload.finished_at) || (table === "content_outputs" && payload.external_post_id))) {
           assert.equal(rows.scheduled_jobs[0].status, "cancelling", "Deletion barrier must remain until worker results have been written");
         }
-      }),
+      });
+    const result = await runScheduledThreadsJob({
+      supabase: userSupabase,
+      credentialSupabase: database(rows),
       userId: "user-1", scheduledJobId: "job-1", force: true,
     });
     const cancelled = cancellationStage !== null;

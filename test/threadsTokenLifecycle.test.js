@@ -7,8 +7,29 @@ const { publishSingleDraft } = require("../src/services/threadsPublishService");
 function createSupabase(accountRow) {
   const savedPayloads = [];
 
+  const credentialSupabase = {
+    from(table) {
+      assert.equal(table, "social_account_credentials");
+      const query = {
+        select() { return query; },
+        eq() { return query; },
+        maybeSingle: async () => ({
+          data: { access_token: accountRow.access_token, refresh_token: accountRow.refresh_token },
+          error: null,
+        }),
+        upsert(payload) {
+          savedPayloads.push(payload);
+          return query;
+        },
+        single: async () => ({ data: { social_account_id: accountRow.id }, error: null }),
+      };
+      return query;
+    },
+  };
+
   return {
     savedPayloads,
+    credentialSupabase,
     from(table) {
       assert.equal(table, "social_accounts");
 
@@ -78,6 +99,7 @@ async function main() {
     await assert.rejects(
       publishSingleDraft({
         supabase,
+        credentialSupabase: supabase.credentialSupabase,
         userId: "user-1",
         contentOutput: { id: "output-1", content: "" },
       }),
@@ -87,7 +109,10 @@ async function main() {
     assert.equal(refreshRequests.length, 1);
     assert.match(refreshRequests[0], /refresh_access_token/);
     assert.match(refreshRequests[0], /access_token=expiring-long-lived-token/);
-    assert.equal(supabase.savedPayloads[0].access_token, "refreshed-access-token");
+    assert.equal(
+      supabase.savedPayloads.find((payload) => payload.access_token)?.access_token,
+      "refreshed-access-token"
+    );
 
     const missingExpirySupabase = createSupabase({
       id: "account-2",
@@ -103,6 +128,7 @@ async function main() {
     await assert.rejects(
       publishSingleDraft({
         supabase: missingExpirySupabase,
+        credentialSupabase: missingExpirySupabase.credentialSupabase,
         userId: "user-1",
         contentOutput: { id: "output-2", content: "" },
       }),
@@ -131,6 +157,7 @@ async function main() {
     await assert.rejects(
       publishSingleDraft({
         supabase: rejectedRefreshSupabase,
+        credentialSupabase: rejectedRefreshSupabase.credentialSupabase,
         userId: "user-1",
         contentOutput: { id: "output-3", content: "" },
       }),
