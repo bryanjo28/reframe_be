@@ -81,6 +81,7 @@ async function runScenario(cancellationStage) {
       supabase: userSupabase,
       credentialSupabase: database(rows),
       userId: "user-1", scheduledJobId: "job-1", force: true,
+      assertScheduleAccessFn: async () => ({ canSchedule: true }),
     });
     const cancelled = cancellationStage !== null;
     const expectedPublishes = cancellationStage === "container" ? 0 : cancelled ? 1 : 2;

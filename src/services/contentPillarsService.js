@@ -1,6 +1,7 @@
 const { isSupabaseConfigured, supabaseAdmin } = require("../config/supabase");
 const sumopodService = require("./sumopodService");
 const { consumeMonthlyAiCredits } = require("./subscriptionUsageService");
+const { assertCapacity } = require("./entitlementsService");
 
 function createHttpError(message, status = 500, details) {
   const error = new Error(message);
@@ -572,6 +573,7 @@ async function createContentPillar({ supabase, userId, payload }) {
     userId,
     personaConfigId: input.personaConfigId,
   });
+  await assertCapacity({ supabase, userId, resource: "content_pillar" });
 
   const insertPayload = buildInsertPayload({ userId, input });
   const { data, error } = await supabase

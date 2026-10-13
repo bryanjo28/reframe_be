@@ -2,9 +2,11 @@ const threadsPublishService = require("../services/threadsPublishService");
 const threadsAuthService = require("../services/threadsAuthService");
 const threadsAccountsService = require("../services/threadsAccountsService");
 const threadsDeletionService = require("../services/threadsDeletionService");
+const entitlementsService = require("../services/entitlementsService");
 
 async function getConnectUrl(req, res, next) {
   try {
+    await entitlementsService.assertThreadsAccess({ supabase: req.supabase, userId: req.user.id });
     const result = threadsAuthService.createAuthorizationRequest({
       userId: req.user.id,
     });

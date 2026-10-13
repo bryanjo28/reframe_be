@@ -1,6 +1,7 @@
 const threadsAccountsService = require("./threadsAccountsService");
 const threadsAuthService = require("./threadsAuthService");
 const scheduledJobsService = require("./scheduledJobsService");
+const { assertScheduleAccess } = require("./entitlementsService");
 const { supabaseAdmin } = require("../config/supabase");
 const { performance } = require("node:perf_hooks");
 const {
@@ -425,6 +426,7 @@ async function ensureFreshThreadsAccount({ supabase, credentialSupabase = supaba
       expiresAt: activeExpiresAt,
     },
     includeCredentials: true,
+    skipEntitlementCheck: true,
   });
 }
 
@@ -1458,7 +1460,7 @@ async function assertScheduledThreadsJobRunning({ supabase, userId, scheduledJob
   }
 }
 
-async function runScheduledThreadsJob({ supabase, credentialSupabase = supabaseAdmin, userId, scheduledJobId, limit = 20, force = false }) {
+async function runScheduledThreadsJob({ supabase, credentialSupabase = supabaseAdmin, userId, scheduledJobId, limit = 20, force = false, assertScheduleAccessFn = assertScheduleAccess }) {
   const nowIso = new Date().toISOString();
   const jobsFetchLimit = Number.isInteger(limit) ? limit : 20;
 
@@ -1518,6 +1520,13 @@ async function runScheduledThreadsJob({ supabase, credentialSupabase = supabaseA
   let skippedCount = 0;
 
   for (const candidateJob of activeJobs) {
+    try {
+      await assertScheduleAccessFn({ supabase, userId });
+    } catch (entitlementError) {
+      skippedCount += 1;
+      results.push({ scheduledJobId: candidateJob.id, success: false, skipped: true, code: entitlementError.code || "SCHEDULE_PLAN_REQUIRED", error: entitlementError.message });
+      continue;
+    }
     const scheduledJob = await claimScheduledThreadsJob({
       supabase,
       userId,

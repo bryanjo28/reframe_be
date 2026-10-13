@@ -249,6 +249,14 @@ run("existing account metadata is not changed when credential rotation fails", a
   const events = [];
   const metadataSupabase = {
     from(table) {
+      if (table === "user_subscriptions") {
+        const subscriptionQuery = { select() { return subscriptionQuery; }, eq() { return subscriptionQuery; }, order() { return subscriptionQuery; }, maybeSingle: async () => ({ data: { id: "subscription-1", user_id: "user-1", plan_id: "starter-plan", status: "active", started_at: "2026-01-01T00:00:00.000Z", ends_at: null }, error: null }) };
+        return subscriptionQuery;
+      }
+      if (table === "subscription_plans") {
+        const planQuery = { select() { return planQuery; }, eq() { return planQuery; }, maybeSingle: async () => ({ data: { id: "starter-plan", code: "starter", name: "Starter", max_personas: 2, max_content_pillars: 3, max_threads_accounts: 1, can_schedule: true, monthly_ai_credits: 200, is_active: true }, error: null }) };
+        return planQuery;
+      }
       assert.equal(table, "social_accounts");
       const selectQuery = {
         select() { return selectQuery; },

@@ -1,5 +1,6 @@
 const { isSupabaseConfigured, supabaseAdmin } = require("../config/supabase");
 const credentialsRepository = require("../repositories/socialAccountCredentialsRepository");
+const { assertThreadsAccess } = require("./entitlementsService");
 
 function createHttpError(message, status = 500, details, code) {
   const error = new Error(message);
@@ -119,6 +120,7 @@ async function saveThreadsAccount({
   userId,
   payload,
   includeCredentials = false,
+  skipEntitlementCheck = false,
 }) {
   if (!isSupabaseConfigured || !supabase) {
     throw createHttpError(
@@ -129,6 +131,7 @@ async function saveThreadsAccount({
 
   const input = normalizeThreadsAccountPayload(payload);
   assertCreateThreadsAccountPayload(input);
+  if (!skipEntitlementCheck) await assertThreadsAccess({ supabase, userId });
 
   const { data: existingAccount, error: existingError } = await supabase
     .from("social_accounts")

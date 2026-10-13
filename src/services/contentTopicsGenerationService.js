@@ -2,7 +2,7 @@ const { isSupabaseConfigured, supabaseAdmin } = require("../config/supabase");
 const sumopodService = require("./sumopodService");
 const { createGenerationTopicLog } = require("./generationTopicLogsService");
 const { consumeDailyGenerationHit } = require("./dailyGenerationUsageService");
-const { consumeMonthlyAiCredits } = require("./subscriptionUsageService");
+const aiCreditsService = require("./aiCreditsService");
 
 const RECENT_TOPICS_LIMIT = 5;
 
@@ -364,7 +364,18 @@ async function generateContentTopics({ supabase, userId, payload }) {
     systemPrompt,
   });
 
+  let creditReservation = null;
   try {
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: prompt },
+    ];
+    creditReservation = await aiCreditsService.reserveCredits({
+      userId,
+      feature: "topic_generation",
+      messages,
+      maxTokens: 1200,
+    });
     const dailyUsage = await consumeDailyGenerationHit({
       supabase,
       usageSupabase: supabaseAdmin,
@@ -375,10 +386,7 @@ async function generateContentTopics({ supabase, userId, payload }) {
     const result = await sumopodService.generateChatCompletion({
       maxTokens: 1200,
       temperature: 0.7,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: prompt },
-      ],
+      messages,
     });
 
     logContentTopicsGenerationDebug("sumopod_raw_response", {
@@ -391,10 +399,11 @@ async function generateContentTopics({ supabase, userId, payload }) {
     const usage = getUsageFromResult(result);
     const topicCount = Array.isArray(parsedContent?.topics) ? parsedContent.topics.length : 0;
 
-    const subscriptionUsage = await consumeMonthlyAiCredits({
-      supabase,
-      usageSupabase: supabaseAdmin,
+    const subscriptionUsage = await aiCreditsService.settleCredits({
       userId,
+      requestId: creditReservation.requestId,
+      feature: "topic_generation",
+      model: result.model,
       usage: result.raw?.usage || null,
     });
 
@@ -439,6 +448,18 @@ async function generateContentTopics({ supabase, userId, payload }) {
 
   return response;
   } catch (error) {
+    if (creditReservation) {
+      try {
+        const providerUsage = error?.usage || error?.response?.usage;
+        if (providerUsage) {
+          await aiCreditsService.settleCredits({ userId, requestId: creditReservation.requestId, feature: "topic_generation", model: process.env.SUMO_MODEL, usage: providerUsage, status: "failed" });
+        } else {
+          await aiCreditsService.releaseReservation({ userId, requestId: creditReservation.requestId });
+        }
+      } catch (creditError) {
+        console.error("Failed to finalize AI credit reservation:", creditError);
+      }
+    }
     try {
       await createGenerationTopicLog({
         supabase,

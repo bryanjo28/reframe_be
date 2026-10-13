@@ -1,6 +1,7 @@
 const router=require("express").Router();
 const auth=require("../middlewares/authMiddleware");
 const controller=require("../controllers/paymentsController");
+router.post("/midtrans/webhook",controller.midtransWebhook);
 router.use(auth);
 router.get("/me",controller.getPage);
 router.post("/orders",controller.createOrder);

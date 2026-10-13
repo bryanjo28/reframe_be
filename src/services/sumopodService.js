@@ -1,4 +1,5 @@
 const { OpenAI } = require("openai");
+const { MAX_AI_OUTPUT_TOKENS } = require("../config/billing");
 
 function normalizeBaseURL(baseURL) {
   if (!baseURL) {
@@ -39,7 +40,7 @@ async function generateChatCompletion({
   const response = await openai.chat.completions.create({
     model,
     messages,
-    max_tokens: maxTokens,
+    max_tokens: Math.min(Math.max(1, Number(maxTokens) || 1200), MAX_AI_OUTPUT_TOKENS),
     temperature,
   });
 

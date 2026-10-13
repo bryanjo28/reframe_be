@@ -1,12 +1,12 @@
 # Threads Data Deletion Callback
 
-Register `https://reframe-be.onrender.com/api/threads/delete` as the Meta data deletion callback URL.
+Register `${APP_BASE_URL}/api/threads/delete` as the Meta data deletion callback URL.
 
 Required backend environment variables:
 
 - `THREADS_APP_SECRET`: secret of the Meta app that signs the callback.
 - `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`: admin database access.
-- `APP_BASE_URL=https://reframe-be.onrender.com`: public backend origin for status URLs.
+- `APP_BASE_URL`: public backend origin for status URLs.
 
 Meta calls `POST /api/threads/delete` with `signed_request` in a form-urlencoded or JSON body. Application bearer authentication is not required. The backend verifies HMAC-SHA256 before accessing the database and matches the signed `user_id` against `social_accounts.platform_user_id` with `platform=threads`.
 
@@ -22,7 +22,7 @@ The backend returns HTTP 200 only after cleanup succeeds:
 
 ```json
 {
-  "url": "https://reframe-be.onrender.com/api/threads/delete/status/<confirmation_code>",
+  "url": "${APP_BASE_URL}/api/threads/delete/status/<confirmation_code>",
   "confirmation_code": "<confirmation_code>"
 }
 ```

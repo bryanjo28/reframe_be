@@ -22,6 +22,7 @@ require("./scheduledJobsValidation.test");
 require("./scheduledJobProgress.test");
 require("./userUsageService.test");
 require("./subscriptionUsageService.test");
+require("./entitlementsService.test");
 require("./dailyGenerationUsageService.test");
 require("./errorHandler.test");
 require("./cronService.test");

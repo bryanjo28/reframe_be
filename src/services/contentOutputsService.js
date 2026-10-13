@@ -4,7 +4,7 @@ const scheduledJobsService = require("./scheduledJobsService");
 const sumopodService = require("./sumopodService");
 const { createGenerationLog } = require("./generationLogsService");
 const { consumeDailyGenerationHit } = require("./dailyGenerationUsageService");
-const { consumeMonthlyAiCredits } = require("./subscriptionUsageService");
+const aiCreditsService = require("./aiCreditsService");
 const {
   applyPagination,
   buildPaginationMetadata,
@@ -1154,6 +1154,7 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
   let sourceContentOutput = null;
   let promptTemplate = null;
   let resolvedPersonaConfigId = workingInput.personaConfigId || null;
+  let creditReservation = null;
 
   try {
     resolvedPersonaConfigId = resolvedPersonaConfigId || topic.persona_config_id;
@@ -1216,6 +1217,17 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
       promptContext,
     });
 
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ];
+    creditReservation = await aiCreditsService.reserveCredits({
+      userId,
+      feature: workingInput.regenerate ? "regeneration" : "content_generation",
+      messages,
+      maxTokens: workingInput.maxTokens || 1200,
+    });
+
     const dailyUsage = await consumeDailyGenerationHit({
       supabase,
       usageSupabase: supabaseAdmin,
@@ -1226,10 +1238,7 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
     const aiResult = await sumopodService.generateChatCompletion({
       maxTokens: workingInput.maxTokens || 1200,
       temperature: workingInput.temperature || 0.5,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
+      messages,
     });
 
     const generatedContent = String(aiResult.content || "").trim() || buildDefaultDraft({
@@ -1247,10 +1256,11 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
       content: aiResult.content,
     });
 
-    const aiUsage = await consumeMonthlyAiCredits({
-      supabase,
-      usageSupabase: supabaseAdmin,
+    const aiUsage = await aiCreditsService.settleCredits({
       userId,
+      requestId: creditReservation.requestId,
+      feature: workingInput.regenerate ? "regeneration" : "content_generation",
+      model: aiResult.model,
       usage: aiResult.raw?.usage || null,
     });
 
@@ -1341,6 +1351,25 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
       personaConfigId: resolvedPersonaConfigId,
     };
   } catch (error) {
+    if (creditReservation) {
+      try {
+        const providerUsage = error?.usage || error?.response?.usage;
+        if (providerUsage) {
+          await aiCreditsService.settleCredits({
+            userId,
+            requestId: creditReservation.requestId,
+            feature: workingInput.regenerate ? "regeneration" : "content_generation",
+            model: process.env.SUMO_MODEL,
+            usage: providerUsage,
+            status: "failed",
+          });
+        } else {
+          await aiCreditsService.releaseReservation({ userId, requestId: creditReservation.requestId });
+        }
+      } catch (creditError) {
+        console.error("Failed to finalize AI credit reservation:", creditError);
+      }
+    }
     try {
       await createGenerationLog({
         supabase,

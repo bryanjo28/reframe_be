@@ -46,7 +46,7 @@ async function main() {
   const originalAdmin = supabaseConfig.supabaseAdmin;
   const originalBaseUrl = process.env.APP_BASE_URL;
   threadsConfig.appSecret = "test-deletion-secret";
-  process.env.APP_BASE_URL = "https://reframe-be.onrender.com";
+  process.env.APP_BASE_URL = "https://api.example.com";
   const calls = [];
   const rows = {
     social_accounts: [
@@ -84,7 +84,7 @@ async function main() {
     const receipt = await response.json();
     assert.deepEqual(Object.keys(receipt).sort(), ["confirmation_code", "url"]);
     assert.match(receipt.confirmation_code, /^[a-zA-Z0-9]+$/);
-    assert.equal(receipt.url, `https://reframe-be.onrender.com/api/threads/delete/status/${receipt.confirmation_code}`);
+    assert.equal(receipt.url, `https://api.example.com/api/threads/delete/status/${receipt.confirmation_code}`);
     assert(calls.some((call) => call[0] === "social_accounts" && call[1] === "eq" && call[2] === "platform_user_id" && call[3] === payload.user_id));
     assert(calls.some((call) => call[0] === "published_posts" && call[1] === "delete"));
     assert(calls.some((call) => call[0] === "social_accounts" && call[1] === "delete"));
