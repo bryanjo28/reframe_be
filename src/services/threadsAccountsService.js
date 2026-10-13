@@ -65,22 +65,27 @@ function assertCreateThreadsAccountPayload(payload) {
   }
 }
 
-function mapThreadsAccountRow(row) {
+function mapThreadsAccountRow(row, { includeCredentials = false } = {}) {
   if (!row) {
     return null;
   }
 
-  return {
+  const account = {
     id: row.id,
     userId: row.user_id,
     platform: row.platform,
-    accessToken: row.access_token,
-    refreshToken: row.refresh_token,
     expiresAt: row.expires_at,
     threadsId: row.platform_user_id,
     accountId: row.username,
     createdAt: row.created_at,
   };
+
+  if (includeCredentials) {
+    account.accessToken = row.access_token;
+    account.refreshToken = row.refresh_token;
+  }
+
+  return account;
 }
 
 function buildInsertPayload({ userId, input }) {
@@ -122,7 +127,7 @@ function buildUpdatePayload(input) {
   return payload;
 }
 
-async function saveThreadsAccount({ supabase, userId, payload }) {
+async function saveThreadsAccount({ supabase, userId, payload, includeCredentials = false }) {
   if (!isSupabaseConfigured || !supabase) {
     throw createHttpError(
       "Supabase is not configured. Fill SUPABASE_URL and SUPABASE_ANON_KEY first.",
@@ -157,7 +162,7 @@ async function saveThreadsAccount({ supabase, userId, payload }) {
       throw createHttpError(error.message, 400, error);
     }
 
-    return mapThreadsAccountRow(data);
+    return mapThreadsAccountRow(data, { includeCredentials });
   }
 
   const { data, error } = await supabase
@@ -170,10 +175,10 @@ async function saveThreadsAccount({ supabase, userId, payload }) {
     throw createHttpError(error.message, 400, error);
   }
 
-  return mapThreadsAccountRow(data);
+  return mapThreadsAccountRow(data, { includeCredentials });
 }
 
-async function getThreadsAccount({ supabase, userId }) {
+async function getThreadsAccount({ supabase, userId, includeCredentials = false }) {
   if (!isSupabaseConfigured || !supabase) {
     throw createHttpError(
       "Supabase is not configured. Fill SUPABASE_URL and SUPABASE_ANON_KEY first.",
@@ -197,7 +202,7 @@ async function getThreadsAccount({ supabase, userId }) {
     );
   }
 
-  return mapThreadsAccountRow(data);
+  return mapThreadsAccountRow(data, { includeCredentials });
 }
 
 async function disconnectThreadsAccount({ supabase, userId }) {

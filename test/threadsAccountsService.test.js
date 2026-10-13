@@ -4,6 +4,7 @@ require("dotenv").config();
 
 const {
   disconnectThreadsAccount,
+  getThreadsAccount,
 } = require("../src/services/threadsAccountsService");
 
 function run(name, fn) {
@@ -98,4 +99,27 @@ run("disconnectThreadsAccount returns a stable code when the service is unavaila
       message: "Threads service is not configured",
     }
   );
+});
+
+run("getThreadsAccount does not expose provider credentials by default", async () => {
+  const account = await getThreadsAccount({
+    supabase: createSupabase({
+      existingRow: {
+        id: "account-1",
+        user_id: "user-1",
+        platform: "threads",
+        access_token: "secret-access-token",
+        refresh_token: "secret-refresh-token",
+        expires_at: "2026-12-01T00:00:00.000Z",
+        platform_user_id: "threads-1",
+        username: "testuser",
+      },
+    }),
+    userId: "user-1",
+  });
+
+  assert.equal(account.id, "account-1");
+  assert.equal(account.threadsId, "threads-1");
+  assert.equal(Object.hasOwn(account, "accessToken"), false);
+  assert.equal(Object.hasOwn(account, "refreshToken"), false);
 });

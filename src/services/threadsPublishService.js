@@ -18,6 +18,7 @@ const {
 
 const THREADS_API_BASE = "https://graph.threads.net";
 const THREADS_API_VERSION = "v1.0";
+const THREADS_TOKEN_REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const THREADS_POST_INTERVAL_MS = Math.max(
   0,
   Number.parseInt(process.env.THREADS_POST_INTERVAL_MS || "2000", 10) || 0
@@ -37,7 +38,7 @@ const THREADS_CONTAINER_MAX_WAIT_MS = getPositiveIntegerEnv(
   60000
 );
 
-function createHttpError(message, status = 500, details) {
+function createHttpError(message, status = 500, details, code) {
   const error = new Error(message);
   error.status = status;
 
@@ -45,7 +46,20 @@ function createHttpError(message, status = 500, details) {
     error.details = details;
   }
 
+  if (code) {
+    error.code = code;
+  }
+
   return error;
+}
+
+function createThreadsReconnectError(details) {
+  return createHttpError(
+    "Threads connection must be renewed",
+    401,
+    details,
+    "THREADS_RECONNECT_REQUIRED"
+  );
 }
 
 function buildUrl(baseUrl, params) {
@@ -340,7 +354,11 @@ function getPublishedPostUrl({ username, postId, responseData }) {
 }
 
 async function ensureFreshThreadsAccount({ supabase, userId }) {
-  const account = await threadsAccountsService.getThreadsAccount({ supabase, userId });
+  const account = await threadsAccountsService.getThreadsAccount({
+    supabase,
+    userId,
+    includeCredentials: true,
+  });
 
   if (!account) {
     throw createHttpError("Threads account not connected", 404);
@@ -355,21 +373,36 @@ async function ensureFreshThreadsAccount({ supabase, userId }) {
   }
 
   if (!account.expiresAt) {
-    return account;
+    throw createThreadsReconnectError({ reason: "missing_expiry" });
   }
 
   const expiresAt = Date.parse(account.expiresAt);
-  if (!Number.isNaN(expiresAt) && expiresAt > Date.now()) {
+  if (Number.isNaN(expiresAt)) {
+    throw createThreadsReconnectError({ reason: "invalid_expiry" });
+  }
+
+  const remainingLifetimeMs = expiresAt - Date.now();
+  if (remainingLifetimeMs <= 0) {
+    throw createThreadsReconnectError({ reason: "expired" });
+  }
+
+  if (remainingLifetimeMs > THREADS_TOKEN_REFRESH_WINDOW_MS) {
     return account;
   }
 
-  if (!account.refreshToken) {
-    return account;
-  }
+  let refreshedToken;
+  try {
+    refreshedToken = await threadsAuthService.refreshLongLivedToken({
+      accessToken: account.accessToken,
+    });
+  } catch (error) {
+    if ([400, 401, 403].includes(error.status)) {
+      throw createThreadsReconnectError({ reason: "refresh_rejected" });
+    }
 
-  const refreshedToken = await threadsAuthService.refreshLongLivedToken({
-    accessToken: account.accessToken,
-  });
+    error.code = error.code || "THREADS_REFRESH_FAILED";
+    throw error;
+  }
 
   const activeAccessToken = refreshedToken.accessToken || account.accessToken;
   const activeRefreshToken = refreshedToken.refreshToken || account.refreshToken;
@@ -388,6 +421,7 @@ async function ensureFreshThreadsAccount({ supabase, userId }) {
       refreshToken: activeRefreshToken,
       expiresAt: activeExpiresAt,
     },
+    includeCredentials: true,
   });
 }
 
