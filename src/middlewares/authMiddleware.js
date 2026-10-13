@@ -2,6 +2,7 @@ const {
   createSupabaseUserClient,
   getUserFromToken,
 } = require("../config/supabase");
+const { DEV_AUTH_USER, isDevAuthToken } = require("../config/devAuth");
 
 function getBearerToken(req) {
   const authorization = req.headers.authorization || "";
@@ -23,6 +24,14 @@ async function authMiddleware(req, res, next) {
         error_code: "UNAUTHORIZED",
         message: "Unauthorized",
       });
+    }
+
+    if (isDevAuthToken(accessToken)) {
+      req.user = DEV_AUTH_USER;
+      req.accessToken = accessToken;
+      req.isDevAuth = true;
+      req.supabase = null;
+      return next();
     }
 
     const user = await getUserFromToken(accessToken);

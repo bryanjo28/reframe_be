@@ -96,13 +96,13 @@ run("content output insert snapshots thread type with a short default", () => {
   assert.equal(defaultPayload.thread_type, "short");
 });
 
-run("content pillar thread type wins when snapshotting a content output", () => {
+run("explicit request thread type overrides the pillar default", () => {
   assert.equal(
     resolveContentOutputThreadType(
       { threadType: "long" },
       { threadType: "short" }
     ),
-    "long"
+    "short"
   );
   assert.equal(resolveContentOutputThreadType(null, {}), "short");
 });

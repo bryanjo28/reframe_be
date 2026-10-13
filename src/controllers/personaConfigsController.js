@@ -1,8 +1,10 @@
 ﻿const personaConfigsService = require("../services/personaConfigsService");
 
+const devPersonaStore = require("../store/devPersonaStore");
+
 async function listPersonaConfigs(req, res, next) {
   try {
-    const data = await personaConfigsService.listPersonaConfigs({
+    const data = req.isDevAuth ? devPersonaStore.list(req.user.id) : await personaConfigsService.listPersonaConfigs({
       supabase: req.supabase,
       userId: req.user.id,
     });
@@ -19,7 +21,7 @@ async function listPersonaConfigs(req, res, next) {
 
 async function getPersonaConfigById(req, res, next) {
   try {
-    const data = await personaConfigsService.getPersonaConfigById({
+    const data = req.isDevAuth ? devPersonaStore.get(req.user.id, req.params.id) : await personaConfigsService.getPersonaConfigById({
       supabase: req.supabase,
       userId: req.user.id,
       id: req.params.id,
@@ -41,7 +43,8 @@ async function createPersonaConfig(req, res, next) {
     console.log("[persona-configs:create] body:", req.body);
     console.log("[persona-configs:create] normalized:", req.personaConfigInput || req.body);
 
-    const data = await personaConfigsService.createPersonaConfig({
+    const normalizedPayload = personaConfigsService.normalizePersonaConfigPayload(req.personaConfigInput || req.body);
+    const data = req.isDevAuth ? devPersonaStore.create(req.user.id, normalizedPayload) : await personaConfigsService.createPersonaConfig({
       supabase: req.supabase,
       userId: req.user.id,
       payload: req.personaConfigInput || req.body,
@@ -59,7 +62,8 @@ async function createPersonaConfig(req, res, next) {
 
 async function updatePersonaConfig(req, res, next) {
   try {
-    const data = await personaConfigsService.updatePersonaConfig({
+    const normalizedPayload = personaConfigsService.normalizePersonaConfigPayload(req.personaConfigInput || req.body);
+    const data = req.isDevAuth ? devPersonaStore.update(req.user.id, req.params.id, normalizedPayload) : await personaConfigsService.updatePersonaConfig({
       supabase: req.supabase,
       userId: req.user.id,
       id: req.params.id,
@@ -78,7 +82,7 @@ async function updatePersonaConfig(req, res, next) {
 
 async function deletePersonaConfig(req, res, next) {
   try {
-    const data = await personaConfigsService.deletePersonaConfig({
+    const data = req.isDevAuth ? devPersonaStore.remove(req.user.id, req.params.id) : await personaConfigsService.deletePersonaConfig({
       supabase: req.supabase,
       userId: req.user.id,
       id: req.params.id,

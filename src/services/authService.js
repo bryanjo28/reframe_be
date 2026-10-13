@@ -6,6 +6,12 @@
   supabase,
   supabaseAdmin,
 } = require("../config/supabase");
+const {
+  DEV_AUTH_PROFILE,
+  DEV_AUTH_TOKEN,
+  DEV_AUTH_USER,
+  matchesDevCredentials,
+} = require("../config/devAuth");
 
 function createHttpError(message, status = 500, details, code = "AUTH_SERVICE_ERROR") {
   const error = new Error(message);
@@ -725,6 +731,22 @@ async function requestPasswordReset({ email, redirectTo }, authClient = supabase
 }
 
 async function login({ email, password }, dependencies = {}) {
+  const normalizedInput = normalizeAuthPayload({ email, password });
+  assertRequiredAuthFields(normalizedInput, ["email", "password"]);
+
+  if (matchesDevCredentials(normalizedInput)) {
+    return normalizeAuthResponse({
+      user: DEV_AUTH_USER,
+      profile: DEV_AUTH_PROFILE,
+      session: {
+        access_token: DEV_AUTH_TOKEN,
+        refresh_token: DEV_AUTH_TOKEN,
+        expires_at: Math.floor(Date.now() / 1000) + 86400,
+        token_type: "bearer",
+      },
+    });
+  }
+
   const authClient = dependencies.authClient || createSupabaseAuthClient();
   const profileLoader = dependencies.profileLoader || getProfileByUserId;
   const subscriptionEnsurer =
@@ -736,9 +758,6 @@ async function login({ email, password }, dependencies = {}) {
       500
     );
   }
-
-  const normalizedInput = normalizeAuthPayload({ email, password });
-  assertRequiredAuthFields(normalizedInput, ["email", "password"]);
 
   const { data, error } = await authClient.auth.signInWithPassword({
     email: normalizedInput.email,

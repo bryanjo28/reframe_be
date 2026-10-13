@@ -228,7 +228,7 @@ function parseThreadParts(content, threadType = "short") {
 }
 
 function resolveContentOutputThreadType(contentPillar, input = {}) {
-  return contentPillar?.threadType || input.threadType || "short";
+  return input.threadType || contentPillar?.threadType || "short";
 }
 
 function mapContentOutputRow(row) {
@@ -1096,6 +1096,10 @@ async function createContentOutput({ supabase, userId, payload }) {
   }
 
   const input = normalizeContentOutputPayload(payload);
+
+  if (input.threadType && !["short", "long"].includes(input.threadType)) {
+    throw createHttpError("threadType must be either short or long", 400);
+  }
   assertCreateContentOutputPayload(input);
 
   const persona = await assertPersonaConfigBelongsToUser({
@@ -1377,6 +1381,10 @@ async function generateContentOutput({ supabase, userId, payload }) {
   }
 
   const input = normalizeContentOutputPayload(payload);
+
+  if (input.threadType && !["short", "long"].includes(input.threadType)) {
+    throw createHttpError("threadType must be either short or long", 400);
+  }
 
   if (!input.topicId) {
     throw createHttpError("Missing required field: topicId", 400);
