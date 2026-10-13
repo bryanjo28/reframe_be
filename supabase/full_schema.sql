@@ -44,16 +44,27 @@ CREATE TABLE public.social_accounts (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
   platform text NOT NULL,
-  access_token text,
-  refresh_token text,
   expires_at timestamp with time zone,
   platform_user_id text,
   username text,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT social_accounts_pkey PRIMARY KEY (id),
+  CONSTRAINT unique_user_platform UNIQUE (user_id, platform),
   CONSTRAINT social_accounts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
 );
+CREATE TABLE public.social_account_credentials (
+  social_account_id uuid NOT NULL,
+  access_token text NOT NULL,
+  refresh_token text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT social_account_credentials_pkey PRIMARY KEY (social_account_id),
+  CONSTRAINT social_account_credentials_social_account_id_fkey
+    FOREIGN KEY (social_account_id) REFERENCES public.social_accounts(id) ON DELETE CASCADE
+);
+ALTER TABLE public.social_account_credentials ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.social_account_credentials FROM anon, authenticated;
 CREATE TABLE public.content_outputs (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,

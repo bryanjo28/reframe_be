@@ -28,3 +28,4 @@ require("./cronService.test");
 require("./pagination.test");
 require("./listPagination.test");
 require("./publishedPosts.test");
+require("./socialAccountCredentialsMigration.test");
