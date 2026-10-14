@@ -44,8 +44,6 @@ CREATE TABLE public.social_accounts (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
   platform text NOT NULL,
-  access_token text,
-  refresh_token text,
   expires_at timestamp with time zone,
   platform_user_id text,
   username text,
@@ -109,8 +107,6 @@ CREATE TABLE public.published_posts (
   CONSTRAINT published_posts_content_output_id_fkey FOREIGN KEY (content_output_id) REFERENCES public.content_outputs(id),
   CONSTRAINT published_posts_parent_published_post_id_fkey FOREIGN KEY (parent_published_post_id) REFERENCES public.published_posts(id)
 );
-CREATE UNIQUE INDEX uq_published_posts_output_sequence
-  ON public.published_posts (content_output_id, sequence_number);
 CREATE TABLE public.generation_logs (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
@@ -180,15 +176,6 @@ CREATE TABLE public.user_usage (
   CONSTRAINT user_usage_pkey PRIMARY KEY (id),
   CONSTRAINT user_usage_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
 );
-CREATE TABLE public.topics2 (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  account text NOT NULL,
-  category text NOT NULL,
-  topic text NOT NULL,
-  used_at timestamp with time zone,
-  created_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT topics2_pkey PRIMARY KEY (id)
-);
 CREATE TABLE public.prompt_templates (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid,
@@ -235,9 +222,6 @@ CREATE TABLE public.scheduled_jobs (
   CONSTRAINT scheduled_jobs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
   CONSTRAINT scheduled_jobs_persona_config_id_fkey FOREIGN KEY (persona_config_id) REFERENCES public.persona_configs(id)
 );
-CREATE INDEX idx_scheduled_jobs_running_threads_heartbeat
-  ON public.scheduled_jobs (heartbeat_at)
-  WHERE status = 'running'::text AND job_type = 'threads_auto_post'::text;
 CREATE TABLE public.content_pillars (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
@@ -248,12 +232,10 @@ CREATE TABLE public.content_pillars (
   audience_segment text,
   key_message text,
   cta_direction text,
-  affiliate_link text,
   is_active boolean NOT NULL DEFAULT true,
   sort_order integer NOT NULL DEFAULT 0,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
-  thread_type text NOT NULL DEFAULT 'short'::text CHECK (thread_type = ANY (ARRAY['short'::text, 'long'::text])),
   CONSTRAINT content_pillars_pkey PRIMARY KEY (id),
   CONSTRAINT content_pillars_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
   CONSTRAINT content_pillars_persona_config_id_fkey FOREIGN KEY (persona_config_id) REFERENCES public.persona_configs(id)
@@ -304,4 +286,71 @@ CREATE TABLE public.user_daily_usage (
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT user_daily_usage_pkey PRIMARY KEY (id),
   CONSTRAINT user_daily_usage_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.token_wallets (
+  user_id uuid NOT NULL,
+  balance bigint NOT NULL DEFAULT 0 CHECK (balance >= 0),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT token_wallets_pkey PRIMARY KEY (user_id),
+  CONSTRAINT token_wallets_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.token_ledger (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  amount bigint NOT NULL CHECK (amount <> 0),
+  balance_after bigint NOT NULL CHECK (balance_after >= 0),
+  kind text NOT NULL CHECK (kind = ANY (ARRAY['plan_grant'::text, 'topup'::text, 'ai_usage'::text, 'adjustment'::text, 'refund'::text])),
+  description text,
+  reference_type text,
+  reference_id text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT token_ledger_pkey PRIMARY KEY (id),
+  CONSTRAINT token_ledger_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.token_packages (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  code text NOT NULL UNIQUE,
+  name text NOT NULL,
+  token_amount bigint NOT NULL CHECK (token_amount > 0),
+  price_idr bigint NOT NULL CHECK (price_idr >= 0),
+  is_active boolean NOT NULL DEFAULT true,
+  sort_order integer NOT NULL DEFAULT 0,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT token_packages_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.payment_orders (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  package_id uuid NOT NULL,
+  amount_idr bigint NOT NULL CHECK (amount_idr >= 0),
+  token_amount bigint NOT NULL CHECK (token_amount > 0),
+  status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'paid'::text, 'failed'::text, 'expired'::text, 'cancelled'::text, 'refunded'::text])),
+  provider text,
+  provider_reference text,
+  paid_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT payment_orders_pkey PRIMARY KEY (id),
+  CONSTRAINT payment_orders_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
+  CONSTRAINT payment_orders_package_id_fkey FOREIGN KEY (package_id) REFERENCES public.token_packages(id)
+);
+CREATE TABLE public.user_notifications (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  type text NOT NULL,
+  title text NOT NULL,
+  message text NOT NULL,
+  read_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT user_notifications_pkey PRIMARY KEY (id),
+  CONSTRAINT user_notifications_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.social_account_credentials (
+  social_account_id uuid NOT NULL,
+  access_token text NOT NULL,
+  refresh_token text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT social_account_credentials_pkey PRIMARY KEY (social_account_id),
+  CONSTRAINT social_account_credentials_social_account_id_fkey FOREIGN KEY (social_account_id) REFERENCES public.social_accounts(id)
 );

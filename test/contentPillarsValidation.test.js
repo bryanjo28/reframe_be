@@ -34,7 +34,7 @@ run("normalizeContentPillarPayload maps schema fields", () => {
   assert.equal(payload.personaConfigId, "persona-id");
   assert.equal(payload.pillarName, "Growth");
   assert.equal(payload.templateContent, "Template");
-  assert.equal(payload.threadType, "long");
+  assert.equal(Object.hasOwn(payload, "threadType"), false);
   assert.equal(payload.isActive, false);
   assert.equal(payload.sortOrder, 3);
 });
@@ -43,13 +43,16 @@ run("normalizeContentPillarPayload ignores removed persisted fields", () => {
   const payload = normalizeContentPillarPayload({
     ai_enhanced_version: "legacy enhanced text",
     user_review_edit: "legacy review text",
+    affiliateLink: "https://example.com/camel",
+    affiliate_link: "https://example.com/snake",
   });
 
   assert.equal(Object.hasOwn(payload, "aiEnhancedVersion"), false);
   assert.equal(Object.hasOwn(payload, "userReviewEdit"), false);
+  assert.equal(Object.hasOwn(payload, "affiliateLink"), false);
 });
 
-run("validateCreateContentPillarRequest rejects invalid threadType", () => {
+run("validateCreateContentPillarRequest ignores legacy threadType", () => {
   const req = {
     body: {
       personaConfigId: "persona-id",
@@ -63,13 +66,12 @@ run("validateCreateContentPillarRequest rejects invalid threadType", () => {
     receivedError = error;
   });
 
-  assert.ok(receivedError);
-  assert.equal(receivedError.status, 400);
-  assert.equal(receivedError.message, "threadType must be either short or long");
+  assert.equal(receivedError, undefined);
+  assert.equal(Object.hasOwn(req.contentPillarInput, "threadType"), false);
 });
 
-run("validateUpdateContentPillarRequest accepts long threadType", () => {
-  const req = { body: { thread_type: "long" } };
+run("validateUpdateContentPillarRequest ignores legacy threadType", () => {
+  const req = { body: { pillarName: "Growth", thread_type: "long" } };
   let receivedError = null;
 
   validateUpdateContentPillarRequest(req, {}, (error) => {
@@ -77,20 +79,7 @@ run("validateUpdateContentPillarRequest accepts long threadType", () => {
   });
 
   assert.equal(receivedError, undefined);
-  assert.equal(req.contentPillarInput.threadType, "long");
-});
-
-run("validateUpdateContentPillarRequest rejects invalid threadType", () => {
-  const req = { body: { threadType: "medium" } };
-  let receivedError = null;
-
-  validateUpdateContentPillarRequest(req, {}, (error) => {
-    receivedError = error;
-  });
-
-  assert.ok(receivedError);
-  assert.equal(receivedError.status, 400);
-  assert.equal(receivedError.message, "threadType must be either short or long");
+  assert.equal(Object.hasOwn(req.contentPillarInput, "threadType"), false);
 });
 
 run("validateEnhanceContentPillarRequest accepts FE payload shape", () => {
@@ -115,6 +104,7 @@ run("validateEnhanceContentPillarRequest accepts FE payload shape", () => {
   assert.equal(receivedError, undefined);
   assert.equal(req.contentPillarInput.pillarName, "Growth");
   assert.equal(req.contentPillarInput.personaConfigId, "persona-id");
+  assert.equal(Object.hasOwn(req.contentPillarInput, "affiliateLink"), false);
 });
 
 run("normalizeContentPillarPayload keeps null for explicit empty booleans", () => {

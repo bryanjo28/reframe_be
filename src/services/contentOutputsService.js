@@ -4,7 +4,7 @@ const scheduledJobsService = require("./scheduledJobsService");
 const sumopodService = require("./sumopodService");
 const { createGenerationLog } = require("./generationLogsService");
 const { consumeDailyGenerationHit } = require("./dailyGenerationUsageService");
-const { consumeMonthlyAiCredits } = require("./subscriptionUsageService");
+const aiCreditsService = require("./aiCreditsService");
 const {
   applyPagination,
   buildPaginationMetadata,
@@ -202,6 +202,10 @@ function assertAutoGenerateContentOutputsPayload(payload) {
   if (payload.targetCount < 1 || payload.targetCount > 20) {
     throw createHttpError("targetCount must be between 1 and 20", 400);
   }
+
+  if (payload.threadType && !["short", "long"].includes(payload.threadType)) {
+    throw createHttpError("threadType must be either short or long", 400);
+  }
 }
 
 function parseThreadParts(content, threadType = "short") {
@@ -228,7 +232,7 @@ function parseThreadParts(content, threadType = "short") {
 }
 
 function resolveContentOutputThreadType(contentPillar, input = {}) {
-  return contentPillar?.threadType || input.threadType || "short";
+  return input.threadType || "short";
 }
 
 function mapContentOutputRow(row) {
@@ -524,7 +528,7 @@ function buildContentOutputUserPrompt({
   promptContext,
   sourceContentOutput,
 }) {
-  const threadType = contentPillar?.threadType || promptContext.threadType || "short";
+  const threadType = promptContext.threadType || "short";
   const threadRequirements =
     threadType === "long"
       ? [
@@ -572,7 +576,6 @@ function buildContentOutputUserPrompt({
     `- Audience Segment: ${contentPillar?.audienceSegment || promptContext.pillarAudienceSegment || "-"}`,
     `- Key Message: ${contentPillar?.keyMessage || promptContext.pillarKeyMessage || "-"}`,
     `- CTA Direction: ${contentPillar?.ctaDirection || promptContext.pillarCtaDirection || "-"}`,
-    `- CTA Link / Affiliate: ${contentPillar?.affiliateLink || promptContext.pillarAffiliateLink || "-"}`,
     "",
     sourceContentOutput?.content
       ? [
@@ -1019,8 +1022,7 @@ function buildPromptContext({ persona, topic, contentPillar, sourceContentOutput
     pillarAudienceSegment: contentPillar?.audienceSegment || "",
     pillarKeyMessage: contentPillar?.keyMessage || "",
     pillarCtaDirection: contentPillar?.ctaDirection || "",
-    pillarAffiliateLink: contentPillar?.affiliateLink || "",
-    threadType: contentPillar?.threadType || "short",
+    threadType: input.threadType || "short",
     category: topic?.category || "",
     topic: topic?.topic || "",
     platform: input.platform || persona?.platform || "threads",
@@ -1068,6 +1070,24 @@ async function listContentOutputs({ supabase, userId, query = {} }) {
     .select("*", { count: "exact" })
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
+  const source = getSource(query);
+  const status = readOptionalText(source, ["status"]);
+  const platform = readOptionalText(source, ["platform"]);
+  const publishScheduledJobId = readOptionalText(source, [
+    "publishScheduledJobId",
+    "publish_scheduled_job_id",
+  ]);
+
+  if (status) {
+    databaseQuery.eq("status", status);
+  }
+  if (platform) {
+    databaseQuery.ilike("platform", platform);
+  }
+  if (publishScheduledJobId) {
+    databaseQuery.eq("publish_scheduled_job_id", publishScheduledJobId);
+  }
+
   const { data, count, error } = await applyPagination(databaseQuery, pagination);
 
   if (error) {
@@ -1119,6 +1139,10 @@ async function createContentOutput({ supabase, userId, payload }) {
   }
 
   const input = normalizeContentOutputPayload(payload);
+
+  if (input.threadType && !["short", "long"].includes(input.threadType)) {
+    throw createHttpError("threadType must be either short or long", 400);
+  }
   assertCreateContentOutputPayload(input);
 
   const persona = await assertPersonaConfigBelongsToUser({
@@ -1171,6 +1195,7 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
   let sourceContentOutput = null;
   let promptTemplate = null;
   let resolvedPersonaConfigId = workingInput.personaConfigId || null;
+  let creditReservation = null;
 
   try {
     resolvedPersonaConfigId = resolvedPersonaConfigId || topic.persona_config_id;
@@ -1233,6 +1258,17 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
       promptContext,
     });
 
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ];
+    creditReservation = await aiCreditsService.reserveCredits({
+      userId,
+      feature: workingInput.regenerate ? "regeneration" : "content_generation",
+      messages,
+      maxTokens: workingInput.maxTokens || 1200,
+    });
+
     const dailyUsage = await consumeDailyGenerationHit({
       supabase,
       usageSupabase: supabaseAdmin,
@@ -1241,13 +1277,9 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
     });
 
     const aiResult = await sumopodService.generateChatCompletion({
-      model: workingInput.model || "gpt-4o-mini",
       maxTokens: workingInput.maxTokens || 1200,
       temperature: workingInput.temperature || 0.5,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
+      messages,
     });
 
     const generatedContent = String(aiResult.content || "").trim() || buildDefaultDraft({
@@ -1265,10 +1297,11 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
       content: aiResult.content,
     });
 
-    const aiUsage = await consumeMonthlyAiCredits({
-      supabase,
-      usageSupabase: supabaseAdmin,
+    const aiUsage = await aiCreditsService.settleCredits({
       userId,
+      requestId: creditReservation.requestId,
+      feature: workingInput.regenerate ? "regeneration" : "content_generation",
+      model: aiResult.model,
       usage: aiResult.raw?.usage || null,
     });
 
@@ -1359,6 +1392,25 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
       personaConfigId: resolvedPersonaConfigId,
     };
   } catch (error) {
+    if (creditReservation) {
+      try {
+        const providerUsage = error?.usage || error?.response?.usage;
+        if (providerUsage) {
+          await aiCreditsService.settleCredits({
+            userId,
+            requestId: creditReservation.requestId,
+            feature: workingInput.regenerate ? "regeneration" : "content_generation",
+            model: process.env.SUMO_MODEL,
+            usage: providerUsage,
+            status: "failed",
+          });
+        } else {
+          await aiCreditsService.releaseReservation({ userId, requestId: creditReservation.requestId });
+        }
+      } catch (creditError) {
+        console.error("Failed to finalize AI credit reservation:", creditError);
+      }
+    }
     try {
       await createGenerationLog({
         supabase,
@@ -1401,8 +1453,16 @@ async function generateContentOutput({ supabase, userId, payload }) {
 
   const input = normalizeContentOutputPayload(payload);
 
+  if (input.threadType && !["short", "long"].includes(input.threadType)) {
+    throw createHttpError("threadType must be either short or long", 400);
+  }
+
   if (!input.topicId) {
     throw createHttpError("Missing required field: topicId", 400);
+  }
+
+  if (!input.threadType) {
+    throw createHttpError("Missing required field: threadType", 400);
   }
 
   const variantCount = input.variantCount === undefined || input.variantCount === null
@@ -1456,6 +1516,7 @@ async function autoGenerateContentOutputs({ supabase, userId, payload }) {
 
   const input = normalizeAutoGenerateContentOutputsPayload(payload);
   assertAutoGenerateContentOutputsPayload(input);
+  input.threadType = input.threadType || "short";
 
   const contentPillar = await assertContentPillarBelongsToUserAndPersona({
     supabase,
@@ -1826,7 +1887,6 @@ async function generateContentOutputDemo({ supabase, userId, payload }) {
   });
 
   const aiResult = await sumopodService.generateChatCompletion({
-    model: "gpt-4o-mini",
     maxTokens: 1200,
     temperature: 0.8,
     messages: [

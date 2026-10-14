@@ -16,8 +16,6 @@
   "audienceSegment": "Founder dan marketer",
   "keyMessage": "Konten harus singkat dan actionable",
   "ctaDirection": "Invite to reply or click",
-  "affiliateLink": "https://example.com",
-  "model": "gemini-2.5-flash-lite",
   "maxTokens": 350,
   "temperature": 0.5,
   "systemPrompt": "You are a helpful assistant that rewrites marketing strategy inputs into a polished, concise, and coherent Indonesian paragraph."

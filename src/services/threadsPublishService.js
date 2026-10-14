@@ -1,6 +1,8 @@
 const threadsAccountsService = require("./threadsAccountsService");
 const threadsAuthService = require("./threadsAuthService");
 const scheduledJobsService = require("./scheduledJobsService");
+const { assertScheduleAccess } = require("./entitlementsService");
+const { supabaseAdmin } = require("../config/supabase");
 const { performance } = require("node:perf_hooks");
 const {
   createScheduledJobRun,
@@ -18,6 +20,7 @@ const {
 
 const THREADS_API_BASE = "https://graph.threads.net";
 const THREADS_API_VERSION = "v1.0";
+const THREADS_TOKEN_REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const THREADS_POST_INTERVAL_MS = Math.max(
   0,
   Number.parseInt(process.env.THREADS_POST_INTERVAL_MS || "2000", 10) || 0
@@ -37,7 +40,7 @@ const THREADS_CONTAINER_MAX_WAIT_MS = getPositiveIntegerEnv(
   60000
 );
 
-function createHttpError(message, status = 500, details) {
+function createHttpError(message, status = 500, details, code) {
   const error = new Error(message);
   error.status = status;
 
@@ -45,7 +48,20 @@ function createHttpError(message, status = 500, details) {
     error.details = details;
   }
 
+  if (code) {
+    error.code = code;
+  }
+
   return error;
+}
+
+function createThreadsReconnectError(details) {
+  return createHttpError(
+    "Threads connection must be renewed",
+    401,
+    details,
+    "THREADS_RECONNECT_REQUIRED"
+  );
 }
 
 function buildUrl(baseUrl, params) {
@@ -339,8 +355,13 @@ function getPublishedPostUrl({ username, postId, responseData }) {
   return `https://www.threads.net/@${username}/post/${postId}`;
 }
 
-async function ensureFreshThreadsAccount({ supabase, userId }) {
-  const account = await threadsAccountsService.getThreadsAccount({ supabase, userId });
+async function ensureFreshThreadsAccount({ supabase, credentialSupabase = supabaseAdmin, userId }) {
+  const account = await threadsAccountsService.getThreadsAccount({
+    supabase,
+    credentialSupabase,
+    userId,
+    includeCredentials: true,
+  });
 
   if (!account) {
     throw createHttpError("Threads account not connected", 404);
@@ -355,21 +376,36 @@ async function ensureFreshThreadsAccount({ supabase, userId }) {
   }
 
   if (!account.expiresAt) {
-    return account;
+    throw createThreadsReconnectError({ reason: "missing_expiry" });
   }
 
   const expiresAt = Date.parse(account.expiresAt);
-  if (!Number.isNaN(expiresAt) && expiresAt > Date.now()) {
+  if (Number.isNaN(expiresAt)) {
+    throw createThreadsReconnectError({ reason: "invalid_expiry" });
+  }
+
+  const remainingLifetimeMs = expiresAt - Date.now();
+  if (remainingLifetimeMs <= 0) {
+    throw createThreadsReconnectError({ reason: "expired" });
+  }
+
+  if (remainingLifetimeMs > THREADS_TOKEN_REFRESH_WINDOW_MS) {
     return account;
   }
 
-  if (!account.refreshToken) {
-    return account;
-  }
+  let refreshedToken;
+  try {
+    refreshedToken = await threadsAuthService.refreshLongLivedToken({
+      accessToken: account.accessToken,
+    });
+  } catch (error) {
+    if ([400, 401, 403].includes(error.status)) {
+      throw createThreadsReconnectError({ reason: "refresh_rejected" });
+    }
 
-  const refreshedToken = await threadsAuthService.refreshLongLivedToken({
-    accessToken: account.accessToken,
-  });
+    error.code = error.code || "THREADS_REFRESH_FAILED";
+    throw error;
+  }
 
   const activeAccessToken = refreshedToken.accessToken || account.accessToken;
   const activeRefreshToken = refreshedToken.refreshToken || account.refreshToken;
@@ -380,6 +416,7 @@ async function ensureFreshThreadsAccount({ supabase, userId }) {
 
   return threadsAccountsService.saveThreadsAccount({
     supabase,
+    credentialSupabase,
     userId,
     payload: {
       accessToken: activeAccessToken,
@@ -388,6 +425,8 @@ async function ensureFreshThreadsAccount({ supabase, userId }) {
       refreshToken: activeRefreshToken,
       expiresAt: activeExpiresAt,
     },
+    includeCredentials: true,
+    skipEntitlementCheck: true,
   });
 }
 
@@ -1160,8 +1199,8 @@ async function markContentOutputPublished({
   };
 }
 
-async function publishSingleDraft({ supabase, userId, contentOutput }) {
-  const account = await ensureFreshThreadsAccount({ supabase, userId });
+async function publishSingleDraft({ supabase, credentialSupabase = supabaseAdmin, userId, contentOutput }) {
+  const account = await ensureFreshThreadsAccount({ supabase, credentialSupabase, userId });
 
   if (!contentOutput.content || String(contentOutput.content).trim().length === 0) {
     throw createHttpError("Content output content is empty", 400);
@@ -1310,7 +1349,7 @@ async function autoPostThreadsDrafts({ supabase, userId, payload = {} }) {
 async function retryFailedThreadsPost({ supabase, userId, payload = {} }) {
   const input = {
     contentOutputId: payload.contentOutputId || payload.content_output_id || null,
-    scheduledAt: payload.scheduledAt || payload.scheduled_at || new Date().toISOString(),
+    scheduledAt: payload.scheduledAt || payload.scheduled_at || payload.scheduleAt || new Date().toISOString(),
   };
 
   if (!input.contentOutputId) {
@@ -1410,7 +1449,18 @@ async function claimScheduledThreadsJob({ supabase, userId, scheduledJobId }) {
   return normalizeScheduledJobRow(data);
 }
 
-async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit = 20, force = false }) {
+async function assertScheduledThreadsJobRunning({ supabase, userId, scheduledJobId }) {
+  const { data, error } = await supabase.from("scheduled_jobs").select("status")
+    .eq("id", scheduledJobId).eq("user_id", userId).maybeSingle();
+  if (error) throw createHttpError("Failed to check Threads job cancellation", 500, error);
+  if (!data || data.status !== "running") {
+    const cancelled = createHttpError("Threads job was cancelled", 409);
+    cancelled.code = "THREADS_JOB_CANCELLED";
+    throw cancelled;
+  }
+}
+
+async function runScheduledThreadsJob({ supabase, credentialSupabase = supabaseAdmin, userId, scheduledJobId, limit = 20, force = false, assertScheduleAccessFn = assertScheduleAccess }) {
   const nowIso = new Date().toISOString();
   const jobsFetchLimit = Number.isInteger(limit) ? limit : 20;
 
@@ -1470,6 +1520,13 @@ async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit 
   let skippedCount = 0;
 
   for (const candidateJob of activeJobs) {
+    try {
+      await assertScheduleAccessFn({ supabase, userId });
+    } catch (entitlementError) {
+      skippedCount += 1;
+      results.push({ scheduledJobId: candidateJob.id, success: false, skipped: true, code: entitlementError.code || "SCHEDULE_PLAN_REQUIRED", error: entitlementError.message });
+      continue;
+    }
     const scheduledJob = await claimScheduledThreadsJob({
       supabase,
       userId,
@@ -1490,249 +1547,279 @@ async function runScheduledThreadsJob({ supabase, userId, scheduledJobId, limit 
       status: scheduledJob.status,
     });
 
-    const scheduledJobRun = await createScheduledJobRun({
-      supabase,
-      userId,
-      payload: {
-        scheduledJobId: scheduledJob.id,
-        targetCount: scheduledJob.targetCount,
-        runPayload: {
+    try {
+      const scheduledJobRun = await createScheduledJobRun({
+        supabase,
+        userId,
+        payload: {
           scheduledJobId: scheduledJob.id,
-          personaConfigId: scheduledJob.personaConfigId,
-          scheduleType: scheduledJob.scheduleType,
-          scheduleValue: scheduledJob.scheduleValue,
+          targetCount: scheduledJob.targetCount,
+          runPayload: {
+            scheduledJobId: scheduledJob.id,
+            personaConfigId: scheduledJob.personaConfigId,
+            scheduleType: scheduledJob.scheduleType,
+            scheduleValue: scheduledJob.scheduleValue,
+          },
         },
-      },
-    });
+      });
 
-    let dueQuery = supabase
-      .from("content_outputs")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("publish_scheduled_job_id", scheduledJob.id)
-      .eq("status", "approved")
-      .ilike("platform", "threads")
-      .is("publish_scheduled_job_run_id", null)
-      .order("scheduled_at", { ascending: true })
-      .order("created_at", { ascending: true })
-      .limit(
-        Number.isInteger(scheduledJob.targetCount) && scheduledJob.targetCount > 0
-          ? scheduledJob.targetCount
-          : 10
-      );
-
-    if (!force) {
-      dueQuery = dueQuery.lte("scheduled_at", nowIso);
-    }
-
-    const { data: dueRows, error: dueError } = await dueQuery;
-
-    console.log(
-      "[runScheduledThreadsJob] due content_outputs for job",
-      scheduledJob.id,
-      ":",
-      (dueRows || []).length,
-      (dueRows || []).map((r) => ({
-        id: r.id,
-        status: r.status,
-        platform: r.platform,
-        scheduled_at: r.scheduled_at,
-        publish_scheduled_job_id: r.publish_scheduled_job_id,
-        publish_scheduled_job_run_id: r.publish_scheduled_job_run_id,
-      }))
-    );
-
-    if (!dueError && (!dueRows || dueRows.length === 0)) {
-      const { data: linkedRows, error: linkedRowsError } = await supabase
+      let dueQuery = supabase
         .from("content_outputs")
-        .select("id, status, platform, scheduled_at, publish_scheduled_job_id, publish_scheduled_job_run_id")
+        .select("*")
         .eq("user_id", userId)
         .eq("publish_scheduled_job_id", scheduledJob.id)
+        .eq("status", "approved")
+        .ilike("platform", "threads")
+        .is("publish_scheduled_job_run_id", null)
+        .order("scheduled_at", { ascending: true })
         .order("created_at", { ascending: true })
-        .limit(10);
+        .limit(
+          Number.isInteger(scheduledJob.targetCount) && scheduledJob.targetCount > 0
+            ? scheduledJob.targetCount
+            : 10
+        );
 
-      const { data: userRows, error: userRowsError } = await supabase
-        .from("content_outputs")
-        .select("id, status, platform, scheduled_at, publish_scheduled_job_id, publish_scheduled_job_run_id")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false })
-        .limit(10);
+      if (!force) {
+        dueQuery = dueQuery.lte("scheduled_at", nowIso);
+      }
 
-      console.log("[runScheduledThreadsJob] debug linked content_outputs:", {
-        scheduledJobId: scheduledJob.id,
-        linkedRowsError: linkedRowsError?.message || null,
-        linkedRows: linkedRows || [],
+      const { data: dueRows, error: dueError } = await dueQuery;
+
+      console.log(
+        "[runScheduledThreadsJob] due content_outputs for job",
+        scheduledJob.id,
+        ":",
+        (dueRows || []).length,
+        (dueRows || []).map((r) => ({
+          id: r.id,
+          status: r.status,
+          platform: r.platform,
+          scheduled_at: r.scheduled_at,
+          publish_scheduled_job_id: r.publish_scheduled_job_id,
+          publish_scheduled_job_run_id: r.publish_scheduled_job_run_id,
+        }))
+      );
+
+      if (!dueError && (!dueRows || dueRows.length === 0)) {
+        const { data: linkedRows, error: linkedRowsError } = await supabase
+          .from("content_outputs")
+          .select("id, status, platform, scheduled_at, publish_scheduled_job_id, publish_scheduled_job_run_id")
+          .eq("user_id", userId)
+          .eq("publish_scheduled_job_id", scheduledJob.id)
+          .order("created_at", { ascending: true })
+          .limit(10);
+
+        const { data: userRows, error: userRowsError } = await supabase
+          .from("content_outputs")
+          .select("id, status, platform, scheduled_at, publish_scheduled_job_id, publish_scheduled_job_run_id")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(10);
+
+        console.log("[runScheduledThreadsJob] debug linked content_outputs:", {
+          scheduledJobId: scheduledJob.id,
+          linkedRowsError: linkedRowsError?.message || null,
+          linkedRows: linkedRows || [],
+        });
+
+        console.log("[runScheduledThreadsJob] debug recent user content_outputs:", {
+          userId,
+          userRowsError: userRowsError?.message || null,
+          userRows: userRows || [],
+        });
+      }
+
+      if (dueError) {
+        failedCount += 1;
+        const finishedAt = new Date().toISOString();
+        await updateScheduledJobRun({
+          supabase,
+          userId,
+          id: scheduledJobRun.id,
+          payload: {
+            status: "failed",
+            failedCount: 1,
+            errorMessage: dueError.message,
+            finishedAt,
+          },
+        });
+        await supabase
+          .from("scheduled_jobs")
+          .update({
+            status: "failed",
+            last_run_at: finishedAt,
+            last_run_status: "failed",
+            last_run_error: dueError.message,
+            error_message: dueError.message,
+          })
+          .eq("id", scheduledJob.id)
+          .eq("user_id", userId);
+        results.push({
+          scheduledJobId: scheduledJob.id,
+          status: "failed",
+          error: dueError.message,
+        });
+        continue;
+      }
+
+      const jobResults = [];
+      let jobSuccessCount = 0;
+      let jobFailedCount = 0;
+      let jobCancelled = false;
+      const assertJobRunning = () => assertScheduledThreadsJobRunning({
+        supabase, userId, scheduledJobId: scheduledJob.id,
       });
 
-      console.log("[runScheduledThreadsJob] debug recent user content_outputs:", {
-        userId,
-        userRowsError: userRowsError?.message || null,
-        userRows: userRows || [],
-      });
-    }
+      for (const row of dueRows || []) {
+        try {
+          await assertJobRunning();
+        } catch (error) {
+          if (error.code !== "THREADS_JOB_CANCELLED") throw error;
+          jobCancelled = true;
+          break;
+        }
+        const { data: claimedRow, error: claimError } = await supabase
+          .from("content_outputs")
+          .update({
+            publish_scheduled_job_run_id: scheduledJobRun.id,
+          })
+          .eq("id", row.id)
+          .eq("user_id", userId)
+          .is("publish_scheduled_job_run_id", null)
+          .select("*")
+          .maybeSingle();
 
-    if (dueError) {
-      failedCount += 1;
+        if (claimError) {
+          jobFailedCount += 1;
+          continue;
+        }
+
+        if (!claimedRow) {
+          continue;
+        }
+
+        try {
+          console.log("[runScheduledThreadsJob] publishing content_output:", claimedRow.id);
+          const account = await ensureFreshThreadsAccount({ supabase, credentialSupabase, userId });
+          console.log("[runScheduledThreadsJob] threads account:", { id: account.id, threadsId: account.threadsId, hasToken: !!account.accessToken });
+          const publication = await publishAndPersistThreadChain({
+            supabase,
+            userId,
+            account,
+            contentOutput: claimedRow,
+            assertLeaseOwnership: assertJobRunning,
+          });
+          const rootPart = publication.parts[0];
+          const postUrl = publication.rootPublishedPost?.postUrl || null;
+
+          const { data: postedRow, error: postedUpdateError } = await supabase
+            .from("content_outputs")
+            .update({
+              status: "posted",
+              external_post_id: publication.rootPlatformPostId,
+            })
+            .eq("id", claimedRow.id)
+            .eq("user_id", userId)
+            .select("*")
+            .maybeSingle();
+
+          if (postedUpdateError) {
+            throw createHttpError(postedUpdateError.message, 400, postedUpdateError);
+          }
+
+          console.log("[runScheduledThreadsJob] published successfully:", { contentOutputId: claimedRow.id, platformPostId: publication.rootPlatformPostId, postUrl });
+          jobSuccessCount += 1;
+          jobResults.push({
+            contentOutputId: claimedRow.id,
+            status: "success",
+            contentOutput: mapContentOutputRow(postedRow),
+            creationId: rootPart.creationId,
+            platformPostId: publication.rootPlatformPostId,
+            postUrl,
+            publishedPosts: publication.publishedPosts,
+          });
+        } catch (error) {
+          if (error.code === "THREADS_JOB_CANCELLED") jobCancelled = true;
+          console.error("[runScheduledThreadsJob] publish failed for content_output:", claimedRow.id, error.message, error.details || "");
+          jobFailedCount += 1;
+
+          await markContentOutputFailed({
+            supabase,
+            userId,
+            contentOutputId: claimedRow.id,
+          }).catch((markError) => {
+            console.error("Failed to mark content output as failed:", markError.message);
+          });
+
+          jobResults.push({
+            contentOutputId: claimedRow.id,
+            status: jobCancelled ? "cancelled" : "failed",
+            error: error.message,
+          });
+          if (jobCancelled) break;
+        } finally {
+          if (!jobCancelled && THREADS_POST_INTERVAL_MS > 0) {
+            await sleep(THREADS_POST_INTERVAL_MS);
+          }
+        }
+      }
+
+      try {
+        await assertJobRunning();
+      } catch (error) {
+        if (error.code !== "THREADS_JOB_CANCELLED") throw error;
+        jobCancelled = true;
+      }
+      const runStatus = jobCancelled ? "cancelled" : jobFailedCount > 0 ? "completed_with_errors" : "completed";
       const finishedAt = new Date().toISOString();
-      await updateScheduledJobRun({
+      const updatedRun = await updateScheduledJobRun({
         supabase,
         userId,
         id: scheduledJobRun.id,
         payload: {
-          status: "failed",
-          failedCount: 1,
-          errorMessage: dueError.message,
+          status: runStatus,
+          fetchedCount: (dueRows || []).length,
+          processedCount: jobResults.length,
+          successCount: jobSuccessCount,
+          failedCount: jobFailedCount,
+          resultPayload: {
+            scheduledJobId: scheduledJob.id,
+            results: jobResults,
+          },
           finishedAt,
         },
       });
+
       await supabase
         .from("scheduled_jobs")
         .update({
-          status: "failed",
           last_run_at: finishedAt,
-          last_run_status: "failed",
-          last_run_error: dueError.message,
-          error_message: dueError.message,
+          next_run_at: null,
+          last_run_status: runStatus,
+          last_run_generated_count: jobSuccessCount,
+          last_run_error: jobFailedCount > 0 ? "One or more posts failed during auto post" : null,
+          error_message: jobFailedCount > 0 ? "One or more posts failed during auto post" : null,
+          status: "completed",
         })
         .eq("id", scheduledJob.id)
-        .eq("user_id", userId);
+        .eq("user_id", userId)
+        .eq("status", "running");
+
+      successCount += jobSuccessCount;
+      failedCount += jobFailedCount;
       results.push({
         scheduledJobId: scheduledJob.id,
-        status: "failed",
-        error: dueError.message,
+        status: runStatus,
+        scheduledJobRun: updatedRun || scheduledJobRun,
+        results: jobResults,
       });
-      continue;
+    } finally {
+      // Release the cancellation barrier only after every worker write has finished.
+      const { error: cancellationError } = await supabase.from("scheduled_jobs")
+        .update({ status: "cancelled", next_run_at: null, last_run_status: "cancelled" })
+        .eq("id", scheduledJob.id).eq("user_id", userId).eq("status", "cancelling");
+      if (cancellationError) throw createHttpError("Failed to finish Threads job cancellation", 500, cancellationError);
     }
-
-    const jobResults = [];
-    let jobSuccessCount = 0;
-    let jobFailedCount = 0;
-
-    for (const row of dueRows || []) {
-      const { data: claimedRow, error: claimError } = await supabase
-        .from("content_outputs")
-        .update({
-          publish_scheduled_job_run_id: scheduledJobRun.id,
-        })
-        .eq("id", row.id)
-        .eq("user_id", userId)
-        .is("publish_scheduled_job_run_id", null)
-        .select("*")
-        .maybeSingle();
-
-      if (claimError) {
-        jobFailedCount += 1;
-        continue;
-      }
-
-      if (!claimedRow) {
-        continue;
-      }
-
-      try {
-        console.log("[runScheduledThreadsJob] publishing content_output:", claimedRow.id);
-        const account = await ensureFreshThreadsAccount({ supabase, userId });
-        console.log("[runScheduledThreadsJob] threads account:", { id: account.id, threadsId: account.threadsId, hasToken: !!account.accessToken });
-        const publication = await publishAndPersistThreadChain({
-          supabase,
-          userId,
-          account,
-          contentOutput: claimedRow,
-        });
-        const rootPart = publication.parts[0];
-        const postUrl = publication.rootPublishedPost?.postUrl || null;
-
-        const { data: postedRow, error: postedUpdateError } = await supabase
-          .from("content_outputs")
-          .update({
-            status: "posted",
-            external_post_id: publication.rootPlatformPostId,
-          })
-          .eq("id", claimedRow.id)
-          .eq("user_id", userId)
-          .select("*")
-          .maybeSingle();
-
-        if (postedUpdateError) {
-          throw createHttpError(postedUpdateError.message, 400, postedUpdateError);
-        }
-
-        console.log("[runScheduledThreadsJob] published successfully:", { contentOutputId: claimedRow.id, platformPostId: publication.rootPlatformPostId, postUrl });
-        jobSuccessCount += 1;
-        jobResults.push({
-          contentOutputId: claimedRow.id,
-          status: "success",
-          contentOutput: mapContentOutputRow(postedRow),
-          creationId: rootPart.creationId,
-          platformPostId: publication.rootPlatformPostId,
-          postUrl,
-          publishedPosts: publication.publishedPosts,
-        });
-      } catch (error) {
-        console.error("[runScheduledThreadsJob] publish failed for content_output:", claimedRow.id, error.message, error.details || "");
-        jobFailedCount += 1;
-
-        await markContentOutputFailed({
-          supabase,
-          userId,
-          contentOutputId: claimedRow.id,
-        }).catch((markError) => {
-          console.error("Failed to mark content output as failed:", markError.message);
-        });
-
-        jobResults.push({
-          contentOutputId: claimedRow.id,
-          status: "failed",
-          error: error.message,
-        });
-      } finally {
-        if (THREADS_POST_INTERVAL_MS > 0) {
-          await sleep(THREADS_POST_INTERVAL_MS);
-        }
-      }
-    }
-
-    const finishedAt = new Date().toISOString();
-    const updatedRun = await updateScheduledJobRun({
-      supabase,
-      userId,
-      id: scheduledJobRun.id,
-      payload: {
-        status: jobFailedCount > 0 ? "completed_with_errors" : "completed",
-        fetchedCount: (dueRows || []).length,
-        processedCount: jobResults.length,
-        successCount: jobSuccessCount,
-        failedCount: jobFailedCount,
-        resultPayload: {
-          scheduledJobId: scheduledJob.id,
-          results: jobResults,
-        },
-        finishedAt,
-      },
-    });
-
-    await supabase
-      .from("scheduled_jobs")
-      .update({
-        last_run_at: finishedAt,
-        next_run_at: null,
-        last_run_status: jobFailedCount > 0 ? "completed_with_errors" : "completed",
-        last_run_generated_count: jobSuccessCount,
-        last_run_error: jobFailedCount > 0 ? "One or more posts failed during auto post" : null,
-        error_message: jobFailedCount > 0 ? "One or more posts failed during auto post" : null,
-        status: "completed",
-      })
-      .eq("id", scheduledJob.id)
-      .eq("user_id", userId);
-
-    successCount += jobSuccessCount;
-    failedCount += jobFailedCount;
-    results.push({
-      scheduledJobId: scheduledJob.id,
-      status: jobFailedCount > 0 ? "completed_with_errors" : "completed",
-      scheduledJobRun: updatedRun || scheduledJobRun,
-      results: jobResults,
-    });
   }
 
   return {

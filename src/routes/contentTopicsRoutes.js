@@ -1,6 +1,7 @@
 ﻿const express = require("express");
 
 const authMiddleware = require("../middlewares/authMiddleware");
+const { aiGenerationLimiter } = require("../middlewares/rateLimiters");
 const contentTopicsController = require("../controllers/contentTopicsController");
 const {
   validateContentTopicIdParam,
@@ -16,6 +17,7 @@ router.use(authMiddleware);
 router.get("/", contentTopicsController.listContentTopics);
 router.post(
   "/generate",
+  aiGenerationLimiter,
   validateGenerateContentTopicsRequest,
   contentTopicsController.generateContentTopics
 );

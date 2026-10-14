@@ -6,6 +6,7 @@
   supabase,
   supabaseAdmin,
 } = require("../config/supabase");
+const { isDisposable } = require("detect-disposable-email");
 
 function createHttpError(message, status = 500, details, code = "AUTH_SERVICE_ERROR") {
   const error = new Error(message);
@@ -94,6 +95,30 @@ function normalizeOptionalText(value) {
   return text.length > 0 ? text : null;
 }
 
+function getBlockedEmailDomains() {
+  return String(process.env.BLOCKED_EMAIL_DOMAINS || "")
+    .split(",")
+    .map((domain) => domain.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function assertAllowedRegistrationEmail(email) {
+  const normalizedEmail = normalizeText(email).toLowerCase();
+  const domain = normalizedEmail.split("@").at(-1) || "";
+  const blockedByConfig = getBlockedEmailDomains().some(
+    (blockedDomain) => domain === blockedDomain || domain.endsWith(`.${blockedDomain}`)
+  );
+
+  if (isDisposable(normalizedEmail) || blockedByConfig) {
+    throw createHttpError(
+      "Disposable or temporary email addresses are not allowed",
+      400,
+      undefined,
+      "DISPOSABLE_EMAIL_NOT_ALLOWED"
+    );
+  }
+}
+
 function normalizeAuthPayload(payload = {}) {
   const source = payload && typeof payload === "object" ? payload : {};
   const email = normalizeText(getFirstDefined(source, ["email"])).toLowerCase();
@@ -169,24 +194,7 @@ function buildThreadsConnectionStatus(row) {
     };
   }
 
-  const accessToken = typeof row.access_token === "string" ? row.access_token.trim() : row.access_token;
   const expiresAt = row.expires_at || null;
-
-  if (!accessToken) {
-    return {
-      connected: false,
-      canUseToken: false,
-      needsReconnect: false,
-      status: "disconnected",
-      reason: "Threads account is disconnected.",
-      accountId: row.username || null,
-      threadsId: row.platform_user_id || null,
-      expiresAt,
-      remainingSeconds: 0,
-      updatedAt: row.updated_at || null,
-      checkedAt: nowIso,
-    };
-  }
 
   if (!expiresAt) {
     return {
@@ -256,7 +264,7 @@ async function getThreadsConnectionStatus({ supabase, userId }) {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const { data, error } = await supabase
       .from("social_accounts")
-      .select("access_token, username, platform_user_id, expires_at, updated_at")
+      .select("username, platform_user_id, expires_at, updated_at")
       .eq("user_id", userId)
       .eq("platform", "threads")
       .maybeSingle();
@@ -625,6 +633,7 @@ async function register(
   });
 
   assertRequiredAuthFields(normalizedInput, ["email", "password", "accountName"]);
+  assertAllowedRegistrationEmail(normalizedInput.email);
   await accountNameChecker(normalizedInput.accountName, adminClient);
   await freePlanLoader();
 
@@ -725,6 +734,9 @@ async function requestPasswordReset({ email, redirectTo }, authClient = supabase
 }
 
 async function login({ email, password }, dependencies = {}) {
+  const normalizedInput = normalizeAuthPayload({ email, password });
+  assertRequiredAuthFields(normalizedInput, ["email", "password"]);
+
   const authClient = dependencies.authClient || createSupabaseAuthClient();
   const profileLoader = dependencies.profileLoader || getProfileByUserId;
   const subscriptionEnsurer =
@@ -736,9 +748,6 @@ async function login({ email, password }, dependencies = {}) {
       500
     );
   }
-
-  const normalizedInput = normalizeAuthPayload({ email, password });
-  assertRequiredAuthFields(normalizedInput, ["email", "password"]);
 
   const { data, error } = await authClient.auth.signInWithPassword({
     email: normalizedInput.email,
@@ -972,6 +981,7 @@ async function logout({ supabase }) {
 
 module.exports = {
   assertAccountNameAvailable,
+  assertAllowedRegistrationEmail,
   assertEmailConfirmed,
   assertRequiredAuthFields,
   changePassword,

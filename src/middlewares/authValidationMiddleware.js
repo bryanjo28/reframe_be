@@ -1,4 +1,5 @@
 ﻿const {
+  assertAllowedRegistrationEmail,
   assertRequiredAuthFields,
   normalizeAuthPayload,
 } = require("../services/authService");
@@ -24,6 +25,7 @@ function validateRegisterRequest(req, res, next) {
   try {
     const authInput = normalizeAuthPayload(req.body);
     assertRequiredAuthFields(authInput, ["email", "password", "accountName"]);
+    assertAllowedRegistrationEmail(authInput.email);
 
     req.authInput = authInput;
     next();

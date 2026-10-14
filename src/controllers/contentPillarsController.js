@@ -97,7 +97,6 @@ async function enhanceContentPillar(req, res, next) {
       userId: req.user.id,
       id: req.params.id,
       input: req.contentPillarInput || req.body,
-      model: req.body?.model,
       maxTokens: req.body?.maxTokens,
       temperature: req.body?.temperature,
       systemPrompt: req.body?.systemPrompt,

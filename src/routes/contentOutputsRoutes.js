@@ -1,6 +1,7 @@
 ﻿const express = require("express");
 
 const authMiddleware = require("../middlewares/authMiddleware");
+const { aiGenerationLimiter } = require("../middlewares/rateLimiters");
 const contentOutputsController = require("../controllers/contentOutputsController");
 const {
   validateScheduleAutoGenerateContentOutputsRequest,
@@ -28,6 +29,7 @@ router.post(
 );
 router.post(
   "/generate",
+  aiGenerationLimiter,
   validateGenerateContentOutputRequest,
   contentOutputsController.generateContentOutput
 );
@@ -38,6 +40,7 @@ router.post(
 );
 router.post(
   "/generate-demo",
+  aiGenerationLimiter,
   validateGenerateContentOutputDemoRequest,
   contentOutputsController.generateContentOutputDemo
 );

@@ -29,6 +29,9 @@ function mapSubscriptionPlanRow(row) {
     code: row.code,
     name: row.name,
     maxPersonas: row.max_personas,
+    maxContentPillars: row.max_content_pillars,
+    maxThreadsAccounts: row.max_threads_accounts,
+    canSchedule: row.can_schedule,
     monthlyAiCredits: row.monthly_ai_credits,
     dailyTopicGenerations: row.daily_topic_generations,
     dailyContentGenerations: row.daily_content_generations,
@@ -79,10 +82,14 @@ async function getActiveUserSubscription({ supabase, userId }) {
     return null;
   }
 
+  if (subscriptionRow.ends_at && new Date(subscriptionRow.ends_at).getTime() <= Date.now()) {
+    return null;
+  }
+
   const { data: planRow, error: planError } = await supabase
     .from("subscription_plans")
     .select(
-      "id, code, name, max_personas, monthly_ai_credits, daily_topic_generations, daily_content_generations, is_active, created_at"
+      "id, code, name, max_personas, max_content_pillars, max_threads_accounts, can_schedule, monthly_ai_credits, daily_topic_generations, daily_content_generations, is_active, created_at"
     )
     .eq("id", subscriptionRow.plan_id)
     .maybeSingle();
@@ -168,7 +175,7 @@ async function consumeMonthlyAiCredits({
       p_user_id: userId,
       p_amount: creditsUsed,
       p_reference_id: String(referenceId),
-      p_description: "Pemakaian fitur AI Reframe",
+      p_description: "Pemakaian fitur AI alurin",
     });
     if (!walletError) {
       return { ...(walletResult || {}), creditsUsed, wallet: true };

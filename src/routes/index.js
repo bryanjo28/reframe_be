@@ -3,6 +3,7 @@
 const { isSupabaseAdminConfigured, isSupabaseConfigured, supabaseUrl } = require("../config/supabase");
 const authRoutes = require("./authRoutes");
 const contentOutputsRoutes = require("./contentOutputsRoutes");
+const publishedPostsRoutes = require("./publishedPostsRoutes");
 const contentPillarsRoutes = require("./contentPillarsRoutes");
 const contentTopicsRoutes = require("./contentTopicsRoutes");
 const personaConfigsRoutes = require("./personaConfigsRoutes");
@@ -46,6 +47,7 @@ router.get("/supabase/health", (req, res) => {
 router.use("/auth", authRoutes);
 router.use("/content-topics", contentTopicsRoutes);
 router.use("/content-outputs", contentOutputsRoutes);
+router.use("/published-posts", publishedPostsRoutes);
 router.use("/content-pillars", contentPillarsRoutes);
 router.use("/persona-configs", personaConfigsRoutes);
 router.use("/prompt-templates", promptTemplatesRoutes);

@@ -3,6 +3,11 @@
 const authController = require("../controllers/authController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const {
+  forgotPasswordLimiter,
+  loginLimiter,
+  registerLimiter,
+} = require("../middlewares/rateLimiters");
+const {
   validateLoginRequest,
   validateForgotPasswordRequest,
   validateRegisterRequest,
@@ -14,12 +19,13 @@ const router = express.Router();
 
 router.post(
   "/register",
+  registerLimiter,
   validateRegistrationEnabled,
   validateRegisterRequest,
   authController.register
 );
 
-router.post("/login", validateLoginRequest, authController.login);
+router.post("/login", loginLimiter, validateLoginRequest, authController.login);
 router.post(
   "/resend-verification",
   validateResendVerificationRequest,
@@ -27,6 +33,7 @@ router.post(
 );
 router.post(
   "/forgot-password",
+  forgotPasswordLimiter,
   validateForgotPasswordRequest,
   authController.forgotPassword
 );

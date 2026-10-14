@@ -1,4 +1,5 @@
 const { isSupabaseConfigured } = require("../config/supabase");
+const { assertScheduleAccess } = require("./entitlementsService");
 
 function createHttpError(message, status = 500, details) {
   const error = new Error(message);
@@ -452,6 +453,7 @@ async function createScheduledJob({ supabase, userId, payload }) {
 
   const input = normalizeScheduledJobPayload(payload);
   assertCreateScheduledJobPayload(input);
+  await assertScheduleAccess({ supabase, userId });
 
   await assertPersonaConfigBelongsToUser({
     supabase,

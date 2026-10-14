@@ -186,7 +186,6 @@ Use this content pillar:
 - Audience Segment: ${pillar.audience_segment}
 - Key Message: ${pillar.key_message}
 - CTA Direction: ${pillar.cta_direction}
-- Affiliate Link: ${pillar.affiliate_link}
 
 Generate 10 content topics.
 `;
