@@ -23,7 +23,12 @@ function normalizeEntitlements(plan = {}) {
     planCode: fallback.code,
     planName: plan.name || fallback.name,
     maxPersonas: Number(plan.maxPersonas ?? plan.max_personas ?? fallback.maxPersonas),
-    maxContentPillars: Number(plan.maxContentPillars ?? plan.max_content_pillars ?? fallback.maxContentPillars),
+    maxContentPillars: Number(
+      plan.maxContentPillars ??
+      plan.content_pillars ??
+      plan.max_content_pillars ??
+      fallback.maxContentPillars
+    ),
     maxThreadsAccounts: Number(plan.maxThreadsAccounts ?? plan.max_threads_accounts ?? fallback.maxThreadsAccounts),
     canSchedule: Boolean(plan.canSchedule ?? plan.can_schedule ?? fallback.canSchedule),
   };

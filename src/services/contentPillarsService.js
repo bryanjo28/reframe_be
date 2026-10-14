@@ -1,6 +1,4 @@
-const { isSupabaseConfigured, supabaseAdmin } = require("../config/supabase");
-const sumopodService = require("./sumopodService");
-const { consumeMonthlyAiCredits } = require("./subscriptionUsageService");
+const { isSupabaseConfigured } = require("../config/supabase");
 const { assertCapacity } = require("./entitlementsService");
 
 function createHttpError(message, status = 500, details) {
@@ -193,82 +191,6 @@ function mapContentPillarRow(row, relations = {}) {
         ? relations.contentOutputCount
         : relations.contentOutputs?.length || 0,
   };
-}
-
-function buildContentPillarEnhancementPrompt(contentPillar, personaConfig = null) {
-  const lines = [
-    "Ubah data content pillar berikut menjadi rangkaian kalimat yang natural, rapi, dan mudah dipahami.",
-    "Tujuannya adalah menghasilkan versi enhanced yang bisa langsung dipakai sebagai konten/brief yang lebih matang.",
-    "Jangan mengarang fakta baru. Pertahankan makna inti dari data yang diberikan.",
-    "Gunakan Bahasa Indonesia yang jelas dan profesional.",
-    "Data content pillar:",
-    `- Pillar Name: ${contentPillar.pillarName || contentPillar.name || "-"}`,
-    `- Template Content: ${contentPillar.templateContent || "-"}`,
-    `- Target Objective: ${contentPillar.targetObjective || "-"}`,
-    `- Audience Segment: ${contentPillar.audienceSegment || "-"}`,
-    `- Key Message: ${contentPillar.keyMessage || "-"}`,
-    `- CTA Direction: ${contentPillar.ctaDirection || "-"}`,
-    "",
-    "Persona config:",
-    `- Persona: ${personaConfig?.persona || "-"}`,
-    `- Target Audience: ${personaConfig?.targetAudience || "-"}`,
-    `- Niche Topic Focus: ${personaConfig?.nicheTopicFocus || "-"}`,
-    `- Content Style: ${personaConfig?.contentStyle || "-"}`,
-    `- Tone: ${personaConfig?.tone || "-"}`,
-    `- Goal: ${personaConfig?.goal || "-"}`,
-    `- Posisi Persona Saat Ini: ${personaConfig?.posisiPersonaSaatIni || "-"}`,
-    `- Audience Masalah Utama: ${personaConfig?.audienceMasalahUtama || "-"}`,
-    `- Apa Yang Mereka Rasakan: ${personaConfig?.apaYangMerekaRasakan || "-"}`,
-    `- Kenapa Harus Follow: ${personaConfig?.kenapaHarusFollow || "-"}`,
-    `- Gaya Komunikasi: ${personaConfig?.gayaKomunikasi || "-"}`,
-    `- Platform: ${personaConfig?.platform || "-"}`,
-    `- Gaya Hook: ${personaConfig?.gayaHook || "-"}`,
-    `- Seberapa Personal: ${personaConfig?.seberapaPersonal || "-"}`,
-    `- CTA Style: ${personaConfig?.ctaStyle || "-"}`,
-    `- Content Pillar Prioritas: ${personaConfig?.contentPillarPrioritas || "-"}`,
-    `- Referensi Gaya: ${personaConfig?.referensiGaya || "-"}`,
-    `- Batasan Konten: ${personaConfig?.batasanKonten || "-"}`,
-    "",
-    "Output yang diinginkan:",
-    "Buat 1 versi enhanced yang terasa seperti rangkaian kalimat yang menyatu. Jika perlu, boleh dibuat 1-2 paragraf singkat. Fokus pada kejelasan, alur, dan kualitas bahasa.",
-    "Note: Jangan ada kalimat berikut adalah / tentu ini adalah. Tapi langsung to the point hasil enhanced pillarnya apa."
-  ];
-
-  return lines.join("\n");
-}
-
-function shouldLogContentPillarEnhancementDebug() {
-  const flag = String(process.env.CONTENT_PILLAR_ENHANCE_DEBUG || "").trim().toLowerCase();
-  return flag === "true" || flag === "1" || flag === "yes";
-}
-
-function logContentPillarEnhancementDebug({
-  enhancementInput,
-  personaConfig,
-  contentPillar,
-  prompt,
-  maxTokens,
-  temperature,
-}) {
-  if (!shouldLogContentPillarEnhancementDebug()) {
-    return;
-  }
-
-  console.log(
-    "[content-pillars.enhance] debug",
-    JSON.stringify(
-      {
-        maxTokens,
-        temperature,
-        enhancementInput,
-        personaConfig,
-        contentPillar,
-        prompt,
-      },
-      null,
-      2
-    )
-  );
 }
 
 function buildInsertPayload({ userId, input }) {
@@ -670,89 +592,10 @@ async function deleteContentPillar({ supabase, userId, id }) {
   return mapContentPillarRow(data);
 }
 
-async function enhanceContentPillarWithAi({
-  supabase,
-  userId,
-  id,
-  input,
-  maxTokens = 350,
-  temperature = 0.5,
-  systemPrompt = "You are a helpful assistant that rewrites marketing strategy inputs into a polished, concise, and coherent Indonesian paragraph.",
-}) {
-  if (!isSupabaseConfigured || !supabase) {
-    throw createHttpError(
-      "Supabase is not configured. Fill SUPABASE_URL and SUPABASE_ANON_KEY first.",
-      500
-    );
-  }
-
-  const enhancementInput = normalizeContentPillarPayload(input);
-  if (!enhancementInput.personaConfigId) {
-    throw createHttpError("Missing required field: personaConfigId", 400);
-  }
-
-  if (!enhancementInput.pillarName) {
-    throw createHttpError("Missing required field: name", 400);
-  }
-
-  const personaConfig = await assertPersonaConfigBelongsToUser({
-    supabase,
-    userId,
-    personaConfigId: enhancementInput.personaConfigId,
-  });
-
-  const contentPillar = id
-    ? await assertContentPillarBelongsToUserAndPersona({
-        supabase,
-        userId,
-        contentPillarId: id,
-        personaConfigId: enhancementInput.personaConfigId,
-      })
-    : null;
-
-  const prompt = buildContentPillarEnhancementPrompt(enhancementInput, personaConfig);
-  logContentPillarEnhancementDebug({
-    enhancementInput,
-    personaConfig,
-    contentPillar,
-    prompt,
-    maxTokens,
-    temperature,
-  });
-
-  const result = await sumopodService.generateChatCompletion({
-    maxTokens,
-    temperature,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: prompt },
-    ],
-  });
-
-  const subscriptionUsage = await consumeMonthlyAiCredits({
-    supabase,
-    usageSupabase: supabaseAdmin,
-    userId,
-    usage: result.raw?.usage || null,
-  });
-
-  return {
-    contentPillar,
-    enhancementInput,
-    personaConfig,
-    model: result.model,
-    aiEnhancedVersion: result.content,
-    prompt,
-    systemPrompt,
-    subscriptionUsage,
-  };
-}
-
 module.exports = {
   assertContentPillarBelongsToUserAndPersona,
   createContentPillar,
   deleteContentPillar,
-  enhanceContentPillarWithAi,
   getContentPillarById,
   listContentPillars,
   normalizeContentPillarPayload,

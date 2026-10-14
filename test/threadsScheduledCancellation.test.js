@@ -82,8 +82,15 @@ async function runScenario(cancellationStage) {
       credentialSupabase: database(rows),
       userId: "user-1", scheduledJobId: "job-1", force: true,
       assertScheduleAccessFn: async () => ({ canSchedule: true }),
+      notifyActivityFn: async (event) => {
+        assert.equal(event.kind, 'threads');
+        assert.equal(event.successCount, rows.published_posts.filter((post) => post.platform_post_id).length);
+        assert.equal(event.cancelled, cancellationStage !== null);
+        (rows.notifications ||= []).push(event);
+      },
     });
     const cancelled = cancellationStage !== null;
+    assert.equal(rows.notifications.length, 1, 'One notification per completed job');
     const expectedPublishes = cancellationStage === "container" ? 0 : cancelled ? 1 : 2;
     assert.equal(apiCalls.filter((path) => path.endsWith("/threads_publish")).length, expectedPublishes);
     assert.equal(apiCalls.filter((path) => path.endsWith("/threads")).length, cancelled ? 1 : 2, "Do not start the next content output after cancellation");

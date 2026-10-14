@@ -4,8 +4,27 @@ const cors = require('cors');
 const apiRoutes = require('./routes');
 const errorHandler = require('./middlewares/errorHandler');
 const { globalApiLimiter } = require('./middlewares/rateLimiters');
+const inputSafetyMiddleware = require('./middlewares/inputSafetyMiddleware');
 
 const app = express();
+
+// Keep diagnostics outside auth/CORS so rejected requests are visible too.
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/auth/')) return next();
+
+  const startedAt = Date.now();
+  const label = `${req.method} ${req.path}`;
+  console.log(`[auth-request] ${new Date().toISOString()} pid=${process.pid} ${label} started`);
+  res.once('finish', () => {
+    console.log(`[auth-request] ${new Date().toISOString()} pid=${process.pid} ${label} status=${res.statusCode} durationMs=${Date.now() - startedAt}`);
+  });
+  res.once('close', () => {
+    if (!res.writableFinished) {
+      console.warn(`[auth-request] ${new Date().toISOString()} pid=${process.pid} ${label} connection closed before response durationMs=${Date.now() - startedAt}`);
+    }
+  });
+  next();
+});
 
 if (process.env.NODE_ENV === "production") {
   app.set("trust proxy", 1);
@@ -40,7 +59,7 @@ app.get('/', (req, res) => {
   });
 });
 
-app.use('/api', globalApiLimiter, apiRoutes);
+app.use('/api', globalApiLimiter, inputSafetyMiddleware, apiRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

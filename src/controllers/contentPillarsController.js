@@ -90,32 +90,9 @@ async function deleteContentPillar(req, res, next) {
   }
 }
 
-async function enhanceContentPillar(req, res, next) {
-  try {
-    const data = await contentPillarsService.enhanceContentPillarWithAi({
-      supabase: req.supabase,
-      userId: req.user.id,
-      id: req.params.id,
-      input: req.contentPillarInput || req.body,
-      maxTokens: req.body?.maxTokens,
-      temperature: req.body?.temperature,
-      systemPrompt: req.body?.systemPrompt,
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Content pillar enhanced successfully",
-      data,
-    });
-  } catch (error) {
-    next(error);
-  }
-}
-
 module.exports = {
   createContentPillar,
   deleteContentPillar,
-  enhanceContentPillar,
   getContentPillarById,
   listContentPillars,
   updateContentPillar,

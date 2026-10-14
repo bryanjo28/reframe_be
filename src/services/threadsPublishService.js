@@ -1,6 +1,7 @@
 const threadsAccountsService = require("./threadsAccountsService");
 const threadsAuthService = require("./threadsAuthService");
 const scheduledJobsService = require("./scheduledJobsService");
+const notificationsService = require("./notificationsService");
 const { assertScheduleAccess } = require("./entitlementsService");
 const { supabaseAdmin } = require("../config/supabase");
 const { performance } = require("node:perf_hooks");
@@ -628,6 +629,7 @@ async function scheduleApprovedContentOutputs({
   limit = 10,
   scheduledAt,
   contentOutputId = null,
+  notify = true,
 }) {
   const queryLimit = Number.isInteger(limit) ? limit : 10;
 
@@ -745,6 +747,9 @@ async function scheduleApprovedContentOutputs({
     },
   });
 
+  if (notify) {
+    await notificationsService.notifyActivity({ userId, kind: 'threads', eventKey: scheduledJob.id, successCount: results.length, scheduled: true });
+  }
   return {
     scheduledJob: activatedJob || scheduledJob,
     scheduledCount: results.length,
@@ -759,6 +764,7 @@ async function scheduleSelectedContentOutputs({
   contentOutputIds,
   scheduledAt,
   scheduleContent = scheduleApprovedContentOutputs,
+  notifyActivityFn = notificationsService.notifyActivity,
 }) {
   const results = [];
 
@@ -771,6 +777,7 @@ async function scheduleSelectedContentOutputs({
         limit: 1,
         scheduledAt,
         contentOutputId,
+        notify: false,
       });
       const contentOutput = scheduled.results[0] || null;
 
@@ -796,6 +803,10 @@ async function scheduleSelectedContentOutputs({
   }
 
   const scheduledCount = results.filter((item) => item.status === "scheduled").length;
+
+  if (scheduledCount) {
+    await notifyActivityFn({ userId, kind: 'threads', eventKey: results.filter((item) => item.scheduledJobId).map((item) => item.scheduledJobId).join(','), successCount: scheduledCount, failedCount: results.length - scheduledCount, scheduled: true });
+  }
 
   return {
     success: true,
@@ -1460,7 +1471,7 @@ async function assertScheduledThreadsJobRunning({ supabase, userId, scheduledJob
   }
 }
 
-async function runScheduledThreadsJob({ supabase, credentialSupabase = supabaseAdmin, userId, scheduledJobId, limit = 20, force = false, assertScheduleAccessFn = assertScheduleAccess }) {
+async function runScheduledThreadsJob({ supabase, credentialSupabase = supabaseAdmin, userId, scheduledJobId, limit = 20, force = false, assertScheduleAccessFn = assertScheduleAccess, notifyActivityFn = notificationsService.notifyActivity }) {
   const nowIso = new Date().toISOString();
   const jobsFetchLimit = Number.isInteger(limit) ? limit : 20;
 
@@ -1630,6 +1641,7 @@ async function runScheduledThreadsJob({ supabase, credentialSupabase = supabaseA
       }
 
       if (dueError) {
+        await notifyActivityFn({ userId, kind: 'threads', eventKey: scheduledJobRun.id, successCount: 0, failedCount: 1 });
         failedCount += 1;
         const finishedAt = new Date().toISOString();
         await updateScheduledJobRun({
@@ -1805,6 +1817,9 @@ async function runScheduledThreadsJob({ supabase, credentialSupabase = supabaseA
         .eq("user_id", userId)
         .eq("status", "running");
 
+      if (jobResults.length || jobCancelled) {
+        await notifyActivityFn({ userId, kind: 'threads', eventKey: scheduledJobRun.id, successCount: jobSuccessCount, failedCount: jobFailedCount, cancelled: jobCancelled });
+      }
       successCount += jobSuccessCount;
       failedCount += jobFailedCount;
       results.push({

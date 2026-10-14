@@ -59,7 +59,7 @@ function mapUserUsageRow(row) {
     id: row.id,
     userId: row.user_id,
     periodMonth: row.period_month,
-    aiCreditsUsed: row.ai_credits_used,
+    totalTokensUsed: row.total_tokens_used,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -74,8 +74,8 @@ async function recordUserAiUsage({ supabase, userId, usage, periodMonth, now = n
     throw createHttpError("Supabase client is required", 500);
   }
 
-  const aiCreditsUsed = normalizeUsageAmount(usage);
-  if (aiCreditsUsed <= 0) {
+  const totalTokensUsed = normalizeUsageAmount(usage);
+  if (totalTokensUsed <= 0) {
     return null;
   }
 
@@ -83,7 +83,7 @@ async function recordUserAiUsage({ supabase, userId, usage, periodMonth, now = n
 
   const { data: existingRow, error: selectError } = await supabase
     .from("user_usage")
-    .select("id, ai_credits_used")
+    .select("id, total_tokens_used")
     .eq("user_id", userId)
     .eq("period_month", targetPeriodMonth)
     .maybeSingle();
@@ -93,11 +93,11 @@ async function recordUserAiUsage({ supabase, userId, usage, periodMonth, now = n
   }
 
   if (existingRow) {
-    const nextTotal = (existingRow.ai_credits_used || 0) + aiCreditsUsed;
+    const nextTotal = (existingRow.total_tokens_used || 0) + totalTokensUsed;
     const { data, error: updateError } = await supabase
       .from("user_usage")
       .update({
-        ai_credits_used: nextTotal,
+        total_tokens_used: nextTotal,
         updated_at: now.toISOString(),
       })
       .eq("id", existingRow.id)
@@ -116,7 +116,7 @@ async function recordUserAiUsage({ supabase, userId, usage, periodMonth, now = n
     .insert({
       user_id: userId,
       period_month: targetPeriodMonth,
-      ai_credits_used: aiCreditsUsed,
+      total_tokens_used: totalTokensUsed,
     })
     .select("*")
     .single();

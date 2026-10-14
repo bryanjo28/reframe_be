@@ -17,6 +17,7 @@ async function run(name, fn) {
 
 run("scheduleSelectedContentOutputs creates one schedule per selected content", async () => {
   const calls = [];
+  const notifications = [];
   const scheduleContent = async (input) => {
     calls.push(input);
     return {
@@ -33,10 +34,14 @@ run("scheduleSelectedContentOutputs creates one schedule per selected content", 
     contentOutputIds: ["content-1", "content-2"],
     scheduledAt: "2026-10-12T11:00:00.000Z",
     scheduleContent,
+    notifyActivityFn: async (event) => notifications.push(event),
   });
 
   assert.deepEqual(calls.map((call) => call.contentOutputId), ["content-1", "content-2"]);
   assert.deepEqual(calls.map((call) => call.limit), [1, 1]);
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].successCount, 2);
+  assert.equal(notifications[0].scheduled, true);
   assert.deepEqual(result.summary, {
     requestedCount: 2,
     scheduledCount: 2,
@@ -68,6 +73,7 @@ run("scheduleSelectedContentOutputs reports one failed selection and continues",
     contentOutputIds: ["content-1", "content-2"],
     scheduledAt: "2026-10-12T11:00:00.000Z",
     scheduleContent,
+    notifyActivityFn: async (event) => { assert.equal(event.successCount, 1); assert.equal(event.failedCount, 1); },
   });
 
   assert.deepEqual(result.summary, {

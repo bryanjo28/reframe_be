@@ -22,14 +22,14 @@ function createHttpError(message, status = 500, details) {
 
 function mapMonthlyUsageSummary({ plan, usage, periodMonth }) {
   const monthlyLimit = Number(plan?.monthlyAiCredits || 0);
-  const aiCreditsUsed = usage?.aiCreditsUsed || 0;
+  const totalTokensUsed = usage?.totalTokensUsed || 0;
 
   return {
     periodMonth: usage?.periodMonth || periodMonth || null,
     usage: usage || null,
     limit: monthlyLimit,
-    used: aiCreditsUsed,
-    remaining: monthlyLimit > 0 ? Math.max(0, monthlyLimit - aiCreditsUsed) : null,
+    used: totalTokensUsed,
+    remaining: monthlyLimit > 0 ? Math.max(0, monthlyLimit - totalTokensUsed) : null,
     unlimited: monthlyLimit === 0,
   };
 }
@@ -49,6 +49,37 @@ function mapDailyUsageSummary({ plan, usageKey, usage, usageDate }) {
   };
 }
 
+function getNextPeriodMonth(periodMonth) {
+  const [year, month] = String(periodMonth || "").split("-").map(Number);
+  const nextMonth = new Date(Date.UTC(year, month, 1));
+  return nextMonth.toISOString().slice(0, 10);
+}
+
+function sumAiUsageCredits(rows = []) {
+  return rows.reduce((total, row) => {
+    const delta = Number(row?.credits_delta || 0);
+    return delta < 0 ? total + Math.abs(delta) : total;
+  }, 0);
+}
+
+async function getMonthlyAiCreditsUsed({ supabase, userId, periodMonth }) {
+  const periodStart = `${periodMonth}T00:00:00.000Z`;
+  const periodEnd = `${getNextPeriodMonth(periodMonth)}T00:00:00.000Z`;
+  const { data, error } = await supabase
+    .from("credit_transactions")
+    .select("credits_delta")
+    .eq("user_id", userId)
+    .eq("transaction_type", "ai_usage")
+    .gte("created_at", periodStart)
+    .lt("created_at", periodEnd);
+
+  if (error) {
+    throw createHttpError(error.message, 500, error);
+  }
+
+  return sumAiUsageCredits(data || []);
+}
+
 async function getMyUsageSummary({ supabase, userId, now = new Date() }) {
   if (!supabase) {
     throw createHttpError("Supabase client is required", 500);
@@ -66,7 +97,7 @@ async function getMyUsageSummary({ supabase, userId, now = new Date() }) {
   const periodMonth = getCurrentPeriodMonth(now);
   const usageDate = getUsageDate(now);
 
-  const [monthlyUsage, topicDailyUsage, contentDailyUsage, walletResult, creditLotsResult, historyResult] = await Promise.all([
+  const [monthlyUsage, topicDailyUsage, contentDailyUsage, walletResult, creditLotsResult, historyResult, usedThisMonth] = await Promise.all([
     getCurrentMonthlyAiUsage({
       supabase,
       userId,
@@ -90,6 +121,7 @@ async function getMyUsageSummary({ supabase, userId, now = new Date() }) {
     supabase.from("token_wallets").select("balance, updated_at").eq("user_id", userId).maybeSingle(),
     supabase.from("credit_lots").select("credit_type, original_credits, remaining_credits, expires_at").eq("user_id", userId),
     supabase.from("ai_usage_logs").select("request_id, feature, model, total_tokens, credits_charged, status, created_at").eq("user_id", userId).order("created_at", { ascending: false }).limit(50),
+    getMonthlyAiCreditsUsed({ supabase, userId, periodMonth }),
   ]);
 
   const plan = activeSubscription.plan;
@@ -125,6 +157,7 @@ async function getMyUsageSummary({ supabase, userId, now = new Date() }) {
       subscription: subscriptionCredits,
       topUp: topUpCredits,
       total: subscriptionCredits + topUpCredits,
+      usedThisMonth,
       nearestTopUpExpiration: activeLots.filter((lot) => lot.credit_type === "topup" && lot.expires_at).map((lot) => lot.expires_at).sort()[0] || null,
     },
     usageHistory: historyResult.error ? [] : historyResult.data || [],
@@ -147,7 +180,9 @@ async function getMyUsageSummary({ supabase, userId, now = new Date() }) {
 }
 
 module.exports = {
+  getMonthlyAiCreditsUsed,
   getMyUsageSummary,
   mapDailyUsageSummary,
   mapMonthlyUsageSummary,
+  sumAiUsageCredits,
 };

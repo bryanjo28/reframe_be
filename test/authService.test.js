@@ -77,6 +77,34 @@ function createSupabaseMock({ profileRow, socialAccountRow, personaConfigRow = n
 }
 
 async function main() {
+  await run("login retries temporary DNS failures and succeeds within the same request", async () => {
+    let attempts = 0;
+    const result = await authService.login({ email: "test@example.com", password: "password" }, {
+      authClient: { auth: { async signInWithPassword() {
+        attempts += 1;
+        if (attempts < 3) throw Object.assign(new TypeError("fetch failed"), { cause: { code: "EAI_AGAIN" } });
+        return { data: { user: { id: "user-1", email: "test@example.com", email_confirmed_at: "2026-01-01" }, session: { access_token: "token" } }, error: null };
+      } } },
+      retrySleep: async () => {},
+      profileLoader: async () => null,
+      subscriptionEnsurer: async () => {},
+    });
+    assert.equal(attempts, 3);
+    assert.equal(result.session.accessToken, "token");
+  });
+
+  await run("login returns 503 after retryable Supabase errors exhaust retries", async () => {
+    let attempts = 0;
+    await assert.rejects(authService.login({ email: "test@example.com", password: "password" }, {
+      authClient: { auth: { async signInWithPassword() {
+        attempts += 1;
+        return { data: null, error: { name: "AuthRetryableFetchError", status: 0, message: "fetch failed" } };
+      } } },
+      retrySleep: async () => {},
+    }), { status: 503, code: "AUTH_SERVICE_UNAVAILABLE" });
+    assert.equal(attempts, 3);
+  });
+
   await run("register masks a session returned for an unconfirmed user", async () => {
     const authClient = {
       auth: {

@@ -733,6 +733,43 @@ async function requestPasswordReset({ email, redirectTo }, authClient = supabase
   return { emailSent: true };
 }
 
+function isTemporaryAuthFailure(error) {
+  const networkCodes = new Set([
+    "EAI_AGAIN", "ECONNRESET", "ECONNREFUSED", "ETIMEDOUT",
+    "ENETUNREACH", "EHOSTUNREACH", "UND_ERR_CONNECT_TIMEOUT",
+    "UND_ERR_SOCKET", "UND_ERR_HEADERS_TIMEOUT",
+  ]);
+  return Boolean(error && (
+    error.name === "AuthRetryableFetchError" ||
+    [502, 503, 504].includes(Number(error.status)) ||
+    networkCodes.has(error.code) || networkCodes.has(error.cause?.code) ||
+    (error instanceof TypeError && error.message === "fetch failed")
+  ));
+}
+
+async function signInWithNetworkRetry(authClient, credentials, retrySleep = sleep) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let result;
+    try {
+      result = await authClient.auth.signInWithPassword(credentials);
+    } catch (error) {
+      if (!isTemporaryAuthFailure(error)) throw error;
+      result = { data: null, error };
+    }
+    if (!isTemporaryAuthFailure(result.error)) return result;
+    if (attempt === 2) {
+      throw createHttpError(
+        "Layanan login sementara tidak tersedia. Silakan coba lagi.",
+        503,
+        undefined,
+        "AUTH_SERVICE_UNAVAILABLE"
+      );
+    }
+    console.warn(`[auth-login] temporary upstream failure; retry=${attempt + 1}/2`);
+    await retrySleep(500 * (attempt + 1));
+  }
+}
+
 async function login({ email, password }, dependencies = {}) {
   const normalizedInput = normalizeAuthPayload({ email, password });
   assertRequiredAuthFields(normalizedInput, ["email", "password"]);
@@ -749,10 +786,10 @@ async function login({ email, password }, dependencies = {}) {
     );
   }
 
-  const { data, error } = await authClient.auth.signInWithPassword({
+  const { data, error } = await signInWithNetworkRetry(authClient, {
     email: normalizedInput.email,
     password: normalizedInput.password,
-  });
+  }, dependencies.retrySleep);
 
   if (error) {
     if (error.code === "email_not_confirmed") {

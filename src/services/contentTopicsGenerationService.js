@@ -3,6 +3,7 @@ const sumopodService = require("./sumopodService");
 const { createGenerationTopicLog } = require("./generationTopicLogsService");
 const { consumeDailyGenerationHit } = require("./dailyGenerationUsageService");
 const aiCreditsService = require("./aiCreditsService");
+const notificationsService = require("./notificationsService");
 
 const RECENT_TOPICS_LIMIT = 5;
 
@@ -446,6 +447,9 @@ async function generateContentTopics({ supabase, userId, payload }) {
       generationTopicLog,
     });
 
+    if (topicCount > 0) {
+      await notificationsService.notifyActivity({ userId, kind: 'topic', eventKey: creditReservation.requestId, successCount: topicCount });
+    }
   return response;
   } catch (error) {
     if (creditReservation) {
@@ -474,6 +478,10 @@ async function generateContentTopics({ supabase, userId, payload }) {
       });
     } catch (logError) {
       console.error("Failed to write generation topic log:", logError);
+    }
+
+    if (creditReservation) {
+      await notificationsService.notifyActivity({ userId, kind: 'topic', eventKey: creditReservation.requestId, successCount: 0, failedCount: 1 });
     }
 
     throw error;

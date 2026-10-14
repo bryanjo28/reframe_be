@@ -32,25 +32,6 @@ function validateCreateContentPillarRequest(req, res, next) {
   }
 }
 
-function validateEnhanceContentPillarRequest(req, res, next) {
-  try {
-    const contentPillarInput = normalizeContentPillarPayload(req.body);
-
-    if (!contentPillarInput.personaConfigId) {
-      throw createHttpError("Missing required field: personaConfigId", 400);
-    }
-
-    if (!contentPillarInput.pillarName) {
-      throw createHttpError("Missing required field: name", 400);
-    }
-
-    req.contentPillarInput = contentPillarInput;
-    next();
-  } catch (error) {
-    next(error);
-  }
-}
-
 function validateUpdateContentPillarRequest(req, res, next) {
   try {
     const contentPillarInput = normalizeContentPillarPayload(req.body);
@@ -95,6 +76,5 @@ function validateContentPillarIdParam(req, res, next) {
 module.exports = {
   validateContentPillarIdParam,
   validateCreateContentPillarRequest,
-  validateEnhanceContentPillarRequest,
   validateUpdateContentPillarRequest,
 };

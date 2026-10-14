@@ -5,6 +5,8 @@ const sumopodService = require("./sumopodService");
 const { createGenerationLog } = require("./generationLogsService");
 const { consumeDailyGenerationHit } = require("./dailyGenerationUsageService");
 const aiCreditsService = require("./aiCreditsService");
+const notificationsService = require("./notificationsService");
+const { randomUUID } = require('node:crypto');
 const {
   applyPagination,
   buildPaginationMetadata,
@@ -1485,6 +1487,7 @@ async function generateContentOutput({ supabase, userId, payload }) {
 
   const results = [];
 
+  try {
   for (let variantIndex = 1; variantIndex <= variantCount; variantIndex += 1) {
     const result = await generateContentOutputForTopic({
       supabase,
@@ -1498,7 +1501,12 @@ async function generateContentOutput({ supabase, userId, payload }) {
     });
     results.push(result);
   }
+  } catch (error) {
+    await notificationsService.notifyActivity({ userId, kind: 'content', eventKey: results.map((result) => result.contentOutput.id).join(',') || randomUUID(), successCount: results.length, failedCount: 1 });
+    throw error;
+  }
 
+  await notificationsService.notifyActivity({ userId, kind: 'content', eventKey: results.map((result) => result.contentOutput.id).join(','), successCount: results.length });
   return {
     contentOutput: results[0]?.contentOutput || null,
     contentOutputs: results.map((result) => result.contentOutput),
@@ -1687,6 +1695,7 @@ async function autoGenerateContentOutputs({ supabase, userId, payload }) {
       .eq("id", input.scheduledJobId)
       .eq("user_id", userId);
 
+    await notificationsService.notifyActivity({ userId, kind: 'content', eventKey: scheduledJobRun.id, successCount, failedCount });
     return {
       success: outcome.success,
       status: outcome.status,
@@ -1700,6 +1709,9 @@ async function autoGenerateContentOutputs({ supabase, userId, payload }) {
     };
   }
 
+  if (results.length) {
+    await notificationsService.notifyActivity({ userId, kind: 'content', eventKey: randomUUID(), successCount, failedCount });
+  }
   return {
     success: outcome.success,
     status: outcome.status,
@@ -1836,6 +1848,7 @@ async function scheduleAutoGenerateContentOutputs({ supabase, userId, payload })
     },
   });
 
+  await notificationsService.notifyActivity({ userId, kind: 'content', eventKey: scheduledJob.id, successCount: topicIds.length, scheduled: true });
   return {
     scheduledJob,
     summary: {

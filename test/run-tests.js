@@ -1,4 +1,6 @@
 require("dotenv").config();
+require("./inputSafety.test");
+require("./notificationsService.test");
 
 require("./authValidation.test");
 require("./authMiddleware.test");
@@ -7,6 +9,7 @@ require("./contentOutputsPrompt.test");
 require("./contentAutoGenerationOutcome.test");
 require("./failedTopicRelease.test");
 require("./contentPillarsValidation.test");
+require("./contentPillarsRoutes.test");
 require("./contentTopicsGeneration.test");
 require("./personaConfigsValidation.test");
 require("./authService.test");
@@ -25,6 +28,8 @@ require("./scheduledJobsValidation.test");
 require("./scheduledJobProgress.test");
 require("./userUsageService.test");
 require("./subscriptionUsageService.test");
+require("./subscriptionPlansService.test");
+require("./usageService.test");
 require("./entitlementsService.test");
 require("./dailyGenerationUsageService.test");
 require("./errorHandler.test");

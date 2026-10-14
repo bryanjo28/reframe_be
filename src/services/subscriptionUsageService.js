@@ -29,9 +29,7 @@ function mapSubscriptionPlanRow(row) {
     code: row.code,
     name: row.name,
     maxPersonas: row.max_personas,
-    maxContentPillars: row.max_content_pillars,
-    maxThreadsAccounts: row.max_threads_accounts,
-    canSchedule: row.can_schedule,
+    maxContentPillars: row.content_pillars,
     monthlyAiCredits: row.monthly_ai_credits,
     dailyTopicGenerations: row.daily_topic_generations,
     dailyContentGenerations: row.daily_content_generations,
@@ -89,7 +87,7 @@ async function getActiveUserSubscription({ supabase, userId }) {
   const { data: planRow, error: planError } = await supabase
     .from("subscription_plans")
     .select(
-      "id, code, name, max_personas, max_content_pillars, max_threads_accounts, can_schedule, monthly_ai_credits, daily_topic_generations, daily_content_generations, is_active, created_at"
+      "id, code, name, max_personas, content_pillars, monthly_ai_credits, daily_topic_generations, daily_content_generations, is_active, created_at"
     )
     .eq("id", subscriptionRow.plan_id)
     .maybeSingle();
@@ -125,7 +123,7 @@ async function getCurrentMonthlyAiUsage({ supabase, userId, periodMonth, now = n
 
   const { data, error } = await supabase
     .from("user_usage")
-    .select("id, user_id, period_month, ai_credits_used, created_at, updated_at")
+    .select("id, user_id, period_month, total_tokens_used, created_at, updated_at")
     .eq("user_id", userId)
     .eq("period_month", targetPeriodMonth)
     .maybeSingle();
@@ -141,7 +139,7 @@ async function getCurrentMonthlyAiUsage({ supabase, userId, periodMonth, now = n
           id: data.id,
           userId: data.user_id,
           periodMonth: data.period_month,
-          aiCreditsUsed: data.ai_credits_used,
+          totalTokensUsed: data.total_tokens_used,
           createdAt: data.created_at,
           updatedAt: data.updated_at,
         }
@@ -206,8 +204,8 @@ async function consumeMonthlyAiCredits({
     now,
   });
 
-  const currentCreditsUsed = currentUsage?.aiCreditsUsed || 0;
-  const nextTotal = currentCreditsUsed + creditsUsed;
+  const currentTokensUsed = currentUsage?.totalTokensUsed || 0;
+  const nextTotal = currentTokensUsed + creditsUsed;
 
   if (nextTotal > monthlyLimit) {
     throw createHttpError(
@@ -215,9 +213,9 @@ async function consumeMonthlyAiCredits({
       429,
       {
         monthlyAiCredits: monthlyLimit,
-        aiCreditsUsed: currentCreditsUsed,
+        totalTokensUsed: currentTokensUsed,
         requestedCredits: creditsUsed,
-        remainingCredits: Math.max(0, monthlyLimit - currentCreditsUsed),
+        remainingCredits: Math.max(0, monthlyLimit - currentTokensUsed),
         periodMonth: targetPeriodMonth,
       },
       "MONTHLY_AI_CREDITS_EXCEEDED"

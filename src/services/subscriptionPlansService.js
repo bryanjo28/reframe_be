@@ -25,9 +25,7 @@ function mapSubscriptionPlanRow(row) {
     name: row.name,
     price: row.price,
     maxPersonas: row.max_personas,
-    maxContentPillars: row.max_content_pillars,
-    maxThreadsAccounts: row.max_threads_accounts,
-    canSchedule: row.can_schedule,
+    maxContentPillars: row.content_pillars,
     monthlyAiCredits: row.monthly_ai_credits,
     tokenAllowance: row.token_allowance || Number(row.monthly_ai_credits || 0) * 5000,
     currency: row.currency || "IDR",
@@ -50,16 +48,16 @@ async function listSubscriptionPlans({ supabase } = {}) {
 
   let { data, error } = await client
     .from("subscription_plans")
-    .select("id, code, name, price, currency, max_personas, max_content_pillars, max_threads_accounts, can_schedule, monthly_ai_credits, token_allowance, daily_topic_generations, daily_content_generations, is_active, created_at")
+    .select("id, code, name, price, currency, max_personas, content_pillars, monthly_ai_credits, token_allowance, daily_topic_generations, daily_content_generations, is_active, created_at")
     .eq("is_active", true)
     .order("price", { ascending: true });
 
   // Keep the application usable while an additive billing migration is being
   // deployed. Values absent from the legacy schema are derived by the mapper.
-  if (error && /currency|token_allowance|max_content_pillars|max_threads_accounts|can_schedule|column .* does not exist/i.test(error.message || "")) {
+  if (error && /currency|token_allowance|column .* does not exist/i.test(error.message || "")) {
     const legacyResult = await client
       .from("subscription_plans")
-      .select("id, code, name, price, max_personas, monthly_ai_credits, daily_topic_generations, daily_content_generations, is_active, created_at")
+      .select("id, code, name, price, max_personas, content_pillars, monthly_ai_credits, daily_topic_generations, daily_content_generations, is_active, created_at")
       .eq("is_active", true)
       .order("price", { ascending: true });
     data = legacyResult.data;

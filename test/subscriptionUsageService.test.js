@@ -1,6 +1,10 @@
 const assert = require("node:assert/strict");
 
-const { consumeMonthlyAiCredits } = require("../src/services/subscriptionUsageService");
+const {
+  consumeMonthlyAiCredits,
+  getActiveUserSubscription,
+  mapSubscriptionPlanRow,
+} = require("../src/services/subscriptionUsageService");
 
 function run(name, fn) {
   return Promise.resolve()
@@ -23,6 +27,7 @@ function createFakeSupabase({
   const state = {
     usageRow,
     insertedPayload: null,
+    planSelectedColumns: null,
     updatedPayload: null,
   };
 
@@ -56,7 +61,7 @@ function createFakeSupabase({
                     id: row.id,
                     user_id: row.user_id,
                     period_month: row.period_month,
-                    ai_credits_used: row.ai_credits_used,
+                    total_tokens_used: row.total_tokens_used,
                     created_at: row.created_at || null,
                     updated_at: row.updated_at || null,
                   }
@@ -70,7 +75,10 @@ function createFakeSupabase({
       };
 
       return {
-        select() {
+        select(columns) {
+          if (tableName === "subscription_plans") {
+            state.planSelectedColumns = columns;
+          }
           return selectChain;
         },
         insert(payload) {
@@ -84,7 +92,7 @@ function createFakeSupabase({
                     id: "usage-row-1",
                     user_id: payload.user_id,
                     period_month: payload.period_month,
-                    ai_credits_used: payload.ai_credits_used,
+                    total_tokens_used: payload.total_tokens_used,
                     created_at: "2026-06-01T00:00:00.000Z",
                     updated_at: "2026-06-01T00:00:00.000Z",
                   };
@@ -112,7 +120,7 @@ function createFakeSupabase({
                         user_id: state.usageRow?.user_id || query.filters.user_id,
                         period_month:
                           state.usageRow?.period_month || query.filters.period_month,
-                        ai_credits_used: payload.ai_credits_used,
+                        total_tokens_used: payload.total_tokens_used,
                         updated_at: payload.updated_at,
                       };
 
@@ -131,6 +139,50 @@ function createFakeSupabase({
 }
 
 (async () => {
+  await run("active subscription plans expose the database pillar limit", async () => {
+    const mapped = mapSubscriptionPlanRow({
+      id: "plan-1",
+      code: "free",
+      name: "Free",
+      max_personas: 1,
+      content_pillars: 4,
+      monthly_ai_credits: 100,
+      is_active: true,
+    });
+
+    assert.equal(mapped.maxContentPillars, 4);
+    assert.equal(Object.hasOwn(mapped, "maxThreadsAccounts"), false);
+    assert.equal(Object.hasOwn(mapped, "canSchedule"), false);
+  });
+
+  await run("active subscription lookup queries the current pillar limit column", async () => {
+    const supabase = createFakeSupabase({
+      subscriptionRow: {
+        id: "sub-1",
+        user_id: "user-123",
+        plan_id: "plan-1",
+        status: "active",
+        started_at: "2026-06-01T00:00:00.000Z",
+      },
+      planRow: {
+        id: "plan-1",
+        code: "free",
+        name: "Free",
+        max_personas: 1,
+        content_pillars: 4,
+        monthly_ai_credits: 100,
+        is_active: true,
+      },
+    });
+
+    await getActiveUserSubscription({ supabase, userId: "user-123" });
+
+    assert.match(supabase.state.planSelectedColumns, /(?:^|,\s*)content_pillars(?:,|$)/);
+    assert.doesNotMatch(supabase.state.planSelectedColumns, /max_content_pillars/);
+    assert.doesNotMatch(supabase.state.planSelectedColumns, /max_threads_accounts/);
+    assert.doesNotMatch(supabase.state.planSelectedColumns, /can_schedule/);
+  });
+
   await run("consumeMonthlyAiCredits records usage when still within quota", async () => {
     const supabase = createFakeSupabase({
       subscriptionRow: {
@@ -152,7 +204,7 @@ function createFakeSupabase({
         id: "usage-1",
         user_id: "user-123",
         period_month: "2026-06-01",
-        ai_credits_used: 40,
+        total_tokens_used: 40,
       },
     });
 
@@ -164,7 +216,7 @@ function createFakeSupabase({
       now: new Date("2026-06-07T00:00:00.000Z"),
     });
 
-    assert.equal(supabase.state.updatedPayload.ai_credits_used, 52);
+    assert.equal(supabase.state.updatedPayload.total_tokens_used, 52);
     assert.equal(result.remainingCredits, 48);
   });
 
@@ -189,7 +241,7 @@ function createFakeSupabase({
         id: "usage-1",
         user_id: "user-123",
         period_month: "2026-06-01",
-        ai_credits_used: 45,
+        total_tokens_used: 45,
       },
     });
 
@@ -242,6 +294,6 @@ function createFakeSupabase({
       periodMonth: "2026-06-01",
     });
 
-    assert.equal(usageSupabase.state.insertedPayload.ai_credits_used, 12);
+    assert.equal(usageSupabase.state.insertedPayload.total_tokens_used, 12);
   });
 })();

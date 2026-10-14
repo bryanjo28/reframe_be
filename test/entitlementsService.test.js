@@ -7,10 +7,10 @@ function run(name, fn) {
 
 function fakeDb({ code = "free", count = 0, endsAt = null } = {}) {
   const definitions = {
-    free: { max_personas: 1, max_content_pillars: 1, max_threads_accounts: 0, can_schedule: false },
-    starter: { max_personas: 2, max_content_pillars: 3, max_threads_accounts: 1, can_schedule: true },
-    creator: { max_personas: 5, max_content_pillars: 10, max_threads_accounts: 1, can_schedule: true },
-    pro: { max_personas: 10, max_content_pillars: 20, max_threads_accounts: 1, can_schedule: true },
+    free: { max_personas: 1, content_pillars: 1, max_threads_accounts: 0, can_schedule: false },
+    starter: { max_personas: 2, content_pillars: 3, max_threads_accounts: 1, can_schedule: true },
+    creator: { max_personas: 5, content_pillars: 10, max_threads_accounts: 1, can_schedule: true },
+    pro: { max_personas: 10, content_pillars: 20, max_threads_accounts: 1, can_schedule: true },
   };
   return { from(table) {
     const query = { select() { return query; }, eq() { return query; }, order() { return query; }, maybeSingle: async () => {
@@ -24,6 +24,10 @@ function fakeDb({ code = "free", count = 0, endsAt = null } = {}) {
 
 run("plan entitlements use the final persona and pillar limits", () => {
   assert.deepEqual(normalizeEntitlements({ code: "creator" }), { planCode: "creator", planName: "Creator", maxPersonas: 5, maxContentPillars: 10, maxThreadsAccounts: 1, canSchedule: true });
+});
+
+run("plan entitlements prefer the current database pillar limit", () => {
+  assert.equal(normalizeEntitlements({ code: "free", content_pillars: 7 }).maxContentPillars, 7);
 });
 
 run("free cannot connect Threads or schedule", async () => {

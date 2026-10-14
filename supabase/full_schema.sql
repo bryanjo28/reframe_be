@@ -151,6 +151,8 @@ CREATE TABLE public.subscription_plans (
   daily_topic_generations integer NOT NULL DEFAULT 0,
   daily_content_generations integer NOT NULL DEFAULT 0,
   price numeric NOT NULL DEFAULT 0,
+  token_allowance bigint NOT NULL DEFAULT 0,
+  currency text NOT NULL DEFAULT 'IDR'::text,
   CONSTRAINT subscription_plans_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.user_subscriptions (
@@ -162,6 +164,9 @@ CREATE TABLE public.user_subscriptions (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   status text NOT NULL DEFAULT 'active'::text CHECK (status = ANY (ARRAY['active'::text, 'inactive'::text, 'paused'::text, 'cancelled'::text, 'expired'::text])),
+  current_period_start timestamp with time zone,
+  current_period_end timestamp with time zone,
+  payment_reference text,
   CONSTRAINT user_subscriptions_pkey PRIMARY KEY (id),
   CONSTRAINT user_subscriptions_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.subscription_plans(id),
   CONSTRAINT user_subscriptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
@@ -330,6 +335,8 @@ CREATE TABLE public.payment_orders (
   paid_at timestamp with time zone,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  credits integer,
+  payment_reference text,
   CONSTRAINT payment_orders_pkey PRIMARY KEY (id),
   CONSTRAINT payment_orders_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
   CONSTRAINT payment_orders_package_id_fkey FOREIGN KEY (package_id) REFERENCES public.token_packages(id)
@@ -353,4 +360,59 @@ CREATE TABLE public.social_account_credentials (
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT social_account_credentials_pkey PRIMARY KEY (social_account_id),
   CONSTRAINT social_account_credentials_social_account_id_fkey FOREIGN KEY (social_account_id) REFERENCES public.social_accounts(id)
+);
+CREATE TABLE public.credit_lots (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  credit_type text NOT NULL CHECK (credit_type = ANY (ARRAY['free'::text, 'subscription'::text, 'topup'::text])),
+  original_credits integer NOT NULL CHECK (original_credits > 0),
+  remaining_credits integer NOT NULL,
+  reserved_credits integer NOT NULL DEFAULT 0,
+  expires_at timestamp with time zone,
+  source_reference text NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT credit_lots_pkey PRIMARY KEY (id),
+  CONSTRAINT credit_lots_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.credit_transactions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  transaction_type text NOT NULL,
+  credits_delta integer NOT NULL,
+  balance_after integer NOT NULL CHECK (balance_after >= 0),
+  source_type text NOT NULL,
+  source_id text,
+  idempotency_key text NOT NULL UNIQUE,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT credit_transactions_pkey PRIMARY KEY (id),
+  CONSTRAINT credit_transactions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.ai_credit_reservations (
+  request_id text NOT NULL,
+  user_id uuid NOT NULL,
+  feature text NOT NULL,
+  reserved_credits integer NOT NULL CHECK (reserved_credits > 0),
+  status text NOT NULL DEFAULT 'reserved'::text CHECK (status = ANY (ARRAY['reserved'::text, 'settled'::text, 'released'::text])),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  settled_at timestamp with time zone,
+  CONSTRAINT ai_credit_reservations_pkey PRIMARY KEY (request_id),
+  CONSTRAINT ai_credit_reservations_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.ai_usage_logs (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  request_id text NOT NULL UNIQUE,
+  feature text NOT NULL,
+  model text NOT NULL,
+  input_tokens integer NOT NULL DEFAULT 0,
+  cached_input_tokens integer NOT NULL DEFAULT 0,
+  output_tokens integer NOT NULL DEFAULT 0,
+  total_tokens integer NOT NULL DEFAULT 0,
+  estimated_cost_idr numeric NOT NULL DEFAULT 0,
+  actual_cost_usd numeric NOT NULL DEFAULT 0,
+  credits_charged integer NOT NULL DEFAULT 0,
+  status text NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT ai_usage_logs_pkey PRIMARY KEY (id),
+  CONSTRAINT ai_usage_logs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
 );

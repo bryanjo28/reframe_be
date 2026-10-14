@@ -5,7 +5,6 @@ const {
 } = require("../src/services/contentPillarsService");
 const {
   validateCreateContentPillarRequest,
-  validateEnhanceContentPillarRequest,
   validateUpdateContentPillarRequest,
   validateContentPillarIdParam,
 } = require("../src/middlewares/contentPillarsValidationMiddleware");
@@ -80,31 +79,6 @@ run("validateUpdateContentPillarRequest ignores legacy threadType", () => {
 
   assert.equal(receivedError, undefined);
   assert.equal(Object.hasOwn(req.contentPillarInput, "threadType"), false);
-});
-
-run("validateEnhanceContentPillarRequest accepts FE payload shape", () => {
-  const req = {
-    body: {
-      personaConfigId: "persona-id",
-      name: "Growth",
-      templateContent: "Template",
-      targetObjective: "Objective",
-      audienceSegment: "Audience",
-      keyMessage: "Key message",
-      ctaDirection: "CTA",
-      affiliateLink: "https://example.com",
-    },
-  };
-  let receivedError = null;
-
-  validateEnhanceContentPillarRequest(req, {}, (error) => {
-    receivedError = error;
-  });
-
-  assert.equal(receivedError, undefined);
-  assert.equal(req.contentPillarInput.pillarName, "Growth");
-  assert.equal(req.contentPillarInput.personaConfigId, "persona-id");
-  assert.equal(Object.hasOwn(req.contentPillarInput, "affiliateLink"), false);
 });
 
 run("normalizeContentPillarPayload keeps null for explicit empty booleans", () => {

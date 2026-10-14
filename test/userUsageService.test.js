@@ -68,9 +68,9 @@ function createFakeSupabase(existingRow = null) {
                         user_id: state.existingRow?.user_id || query.filters.user_id,
                         period_month:
                           state.existingRow?.period_month || query.filters.period_month,
-                        ai_credits_used:
-                          (state.existingRow?.ai_credits_used || 0) + payload.ai_credits_used -
-                          (state.existingRow?.ai_credits_used || 0),
+                        total_tokens_used:
+                          (state.existingRow?.total_tokens_used || 0) + payload.total_tokens_used -
+                          (state.existingRow?.total_tokens_used || 0),
                         ...payload,
                       };
 
@@ -94,7 +94,7 @@ function createFakeSupabase(existingRow = null) {
                     id: "usage-row-1",
                     user_id: payload.user_id,
                     period_month: payload.period_month,
-                    ai_credits_used: payload.ai_credits_used,
+                    total_tokens_used: payload.total_tokens_used,
                     created_at: "2026-06-01T00:00:00.000Z",
                     updated_at: "2026-06-01T00:00:00.000Z",
                   };
@@ -134,8 +134,8 @@ function createFakeSupabase(existingRow = null) {
 
     assert.equal(supabase.state.insertedPayload.user_id, "user-123");
     assert.equal(supabase.state.insertedPayload.period_month, "2026-06-01");
-    assert.equal(supabase.state.insertedPayload.ai_credits_used, 12);
-    assert.equal(result.aiCreditsUsed, 12);
+    assert.equal(supabase.state.insertedPayload.total_tokens_used, 12);
+    assert.equal(result.totalTokensUsed, 12);
   });
 
   await run("recordUserAiUsage updates an existing monthly row", async () => {
@@ -143,7 +143,7 @@ function createFakeSupabase(existingRow = null) {
       id: "usage-row-1",
       user_id: "user-123",
       period_month: "2026-06-01",
-      ai_credits_used: 10,
+      total_tokens_used: 10,
     });
 
     const result = await recordUserAiUsage({
@@ -154,7 +154,7 @@ function createFakeSupabase(existingRow = null) {
       now: new Date("2026-06-07T00:00:00.000Z"),
     });
 
-    assert.equal(supabase.state.updatedPayload.ai_credits_used, 16);
-    assert.equal(result.aiCreditsUsed, 16);
+    assert.equal(supabase.state.updatedPayload.total_tokens_used, 16);
+    assert.equal(result.totalTokensUsed, 16);
   });
 })();
