@@ -2,7 +2,7 @@
 
 async function register(req, res, next) {
   try {
-    const result = await authService.register(req.authInput || req.body);
+    const result = await authService.register(req.authInput || req.body, { requestId: req.requestId });
 
     res.status(201).json({
       success: true,

@@ -30,7 +30,7 @@ async function main() {
     select() { return this; },
     eq(key, value) { filters.push([key, value]); return this; },
     order(key, options) { assert.equal(key, 'created_at'); assert.equal(options.ascending, false); return this; },
-    async limit(value) { assert.equal(value, 20); return { data: [], error: null }; },
+    async limit(value) { assert.equal(value, 10); return { data: [], error: null }; },
     update(value) { assert.ok(Date.parse(value.read_at)); return this; },
     async maybeSingle() { return { data: storedRow, error: null }; },
   };

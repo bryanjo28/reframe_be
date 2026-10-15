@@ -23,10 +23,12 @@ function loadAuthServiceWithMockSupabaseAdmin({ existingSubscription = null, fre
 
   const state = {
     insertedPayload: null,
+    planQueries: 0,
   };
 
   const supabaseAdminMock = {
     from(table) {
+      if (table === "subscription_plans") state.planQueries += 1;
       const query = {
         filters: {},
         select() {
@@ -99,6 +101,16 @@ function loadAuthServiceWithMockSupabaseAdmin({ existingSubscription = null, fre
 }
 
 (async () => {
+  await run("ensureFreeSubscriptionForUser reuses the validated registration plan", async () => {
+    const { authService, state } = loadAuthServiceWithMockSupabaseAdmin({});
+    await authService.ensureFreeSubscriptionForUser({
+      userId: "user-123",
+      freePlan: { id: "plan-free", is_active: true },
+    });
+    assert.equal(state.planQueries, 0);
+    assert.equal(state.insertedPayload.plan_id, "plan-free");
+  });
+
   await run("ensureFreeSubscriptionForUser creates free subscription when missing", async () => {
     const { authService, state } = loadAuthServiceWithMockSupabaseAdmin({
       existingSubscription: null,

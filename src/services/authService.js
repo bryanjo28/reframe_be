@@ -539,7 +539,7 @@ async function resolveRegistrationError(error, accountName, adminClient = supaba
   throw createRegistrationError(error);
 }
 
-async function ensureFreeSubscriptionForUser({ userId }) {
+async function ensureFreeSubscriptionForUser({ userId, freePlan: preloadedFreePlan }) {
   if (!isSupabaseAdminConfigured || !supabaseAdmin) {
     throw createHttpError(
       "Supabase admin client is not configured. Fill SUPABASE_SERVICE_ROLE_KEY first.",
@@ -566,7 +566,7 @@ async function ensureFreeSubscriptionForUser({ userId }) {
     return existingSubscription;
   }
 
-  const freePlan = await getActiveFreePlan();
+  const freePlan = preloadedFreePlan || await getActiveFreePlan();
 
   const { data: createdSubscription, error: createSubscriptionError } = await supabaseAdmin
     .from("user_subscriptions")
@@ -618,6 +618,19 @@ async function register(
     dependencies.subscriptionEnsurer || ensureFreeSubscriptionForUser;
   const adminClient = dependencies.adminClient || supabaseAdmin;
 
+  async function timedStage(stage, operation) {
+    const startedAt = performance.now();
+    let status = "success";
+    try {
+      return await operation();
+    } catch (error) {
+      status = "error";
+      throw error;
+    } finally {
+      console.log(`[auth-register] requestId=${dependencies.requestId || "unknown"} stage=${stage} status=${status} durationMs=${Math.round(performance.now() - startedAt)}`);
+    }
+  }
+
   if (!authClient) {
     throw createHttpError(
       "Supabase is not configured. Fill SUPABASE_URL and SUPABASE_ANON_KEY first.",
@@ -634,10 +647,12 @@ async function register(
 
   assertRequiredAuthFields(normalizedInput, ["email", "password", "accountName"]);
   assertAllowedRegistrationEmail(normalizedInput.email);
-  await accountNameChecker(normalizedInput.accountName, adminClient);
-  await freePlanLoader();
+  const [, freePlan] = await Promise.all([
+    timedStage("account-name", () => accountNameChecker(normalizedInput.accountName, adminClient)),
+    timedStage("free-plan", () => freePlanLoader()),
+  ]);
 
-  const { data: signUpData, error: signUpError } = await authClient.auth.signUp({
+  const { data: signUpData, error: signUpError } = await timedStage("supabase-signup", () => authClient.auth.signUp({
     email: normalizedInput.email,
     password: normalizedInput.password,
     options: {
@@ -651,7 +666,7 @@ async function register(
           normalizedInput.accountName,
       },
     },
-  });
+  }));
 
   if (signUpError) {
     await resolveRegistrationError(
@@ -667,15 +682,16 @@ async function register(
 
   const emailConfirmationRequired = !signUpData.user.email_confirmed_at;
   const profile = !emailConfirmationRequired && signUpData.session?.access_token
-    ? await profileLoader({
+    ? await timedStage("profile", () => profileLoader({
         userId: signUpData.user.id,
         accessToken: signUpData.session.access_token,
-      })
+      }))
     : null;
 
-  await subscriptionEnsurer({
+  await timedStage("subscription", () => subscriptionEnsurer({
     userId: signUpData.user.id,
-  });
+    freePlan,
+  }));
 
   return buildRegistrationResponse({
     user: signUpData.user,

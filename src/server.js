@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const app = require('./app');
 const { startCronJobs } = require('./services/cronService');
+const { startCreditRecovery } = require('./services/aiCreditsService');
 
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -11,6 +12,7 @@ const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`[server] ${new Date().toISOString()} pid=${process.pid} ready port=${PORT}`);
   startCronJobs();
+  startCreditRecovery();
 });
 
 server.on('error', (error) => {

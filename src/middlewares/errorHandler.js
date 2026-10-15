@@ -1,4 +1,4 @@
-const { recordServerError, redactMessage } = require("../services/adminErrorLogService");
+const { recordServerError, redactMessage } = require("../services/admin/adminErrorLogService");
 
 async function errorHandler(err, req, res, next) {
   if (err?.type === "entity.too.large") {
@@ -43,7 +43,7 @@ async function errorHandler(err, req, res, next) {
     success: false,
     ...(err.code ? { error_code: err.code } : {}),
     ...(req.requestId ? { request_id: req.requestId } : {}),
-    message: err.message || "Internal server error",
+    message: statusCode >= 500 ? "Terjadi gangguan pada server. Silakan coba lagi nanti." : err.message || "Request failed",
   });
 }
 

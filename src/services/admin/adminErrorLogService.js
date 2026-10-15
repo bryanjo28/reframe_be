@@ -1,4 +1,4 @@
-const { isSupabaseAdminConfigured, supabaseAdmin } = require("../config/supabase");
+const { isSupabaseAdminConfigured, supabaseAdmin } = require("../../config/supabase");
 
 function redactMessage(value) {
   return String(value || "Internal server error")

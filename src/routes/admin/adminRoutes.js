@@ -1,8 +1,8 @@
 const express = require("express");
-const authMiddleware = require("../middlewares/authMiddleware");
-const requireAdmin = require("../middlewares/adminMiddleware");
-const { adminApiLimiter } = require("../middlewares/rateLimiters");
-const adminController = require("../controllers/adminController");
+const authMiddleware = require("../../middlewares/authMiddleware");
+const requireAdmin = require("../../middlewares/admin/adminMiddleware");
+const { adminApiLimiter } = require("../../middlewares/rateLimiters");
+const adminController = require("../../controllers/admin/adminController");
 
 const router = express.Router();
 

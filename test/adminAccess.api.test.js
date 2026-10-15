@@ -23,7 +23,7 @@ async function main() {
   };
   require.cache[authMiddlewarePath] = mockedAuthModule;
 
-  const adminRoutesPath = require.resolve("../src/routes/adminRoutes");
+  const adminRoutesPath = require.resolve("../src/routes/admin/adminRoutes");
   delete require.cache[adminRoutesPath];
   const adminRoutes = require(adminRoutesPath);
   const app = express();

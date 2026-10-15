@@ -1,5 +1,5 @@
-const { isSupabaseAdminConfigured, supabaseAdmin } = require("../config/supabase");
-const { normalizePagination } = require("../utils/pagination");
+const { isSupabaseAdminConfigured, supabaseAdmin } = require("../../config/supabase");
+const { normalizePagination } = require("../../utils/pagination");
 
 function createHttpError(message, status = 500, code = "ADMIN_SERVICE_ERROR") {
   const error = new Error(message);

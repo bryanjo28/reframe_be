@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const requireAdmin = require("../src/middlewares/adminMiddleware");
+const requireAdmin = require("../src/middlewares/admin/adminMiddleware");
 
 function makeResponse() {
   return {

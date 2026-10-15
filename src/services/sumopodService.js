@@ -26,6 +26,8 @@ function createSumoPodClient() {
   return new OpenAI({
     apiKey,
     baseURL,
+    timeout: 120_000,
+    maxRetries: 0,
   });
 }
 

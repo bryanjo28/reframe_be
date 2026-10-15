@@ -366,6 +366,8 @@ async function generateContentTopics({ supabase, userId, payload }) {
   });
 
   let creditReservation = null;
+  let providerResult = null;
+  let creditsSettled = false;
   try {
     const messages = [
       { role: "system", content: systemPrompt },
@@ -389,6 +391,7 @@ async function generateContentTopics({ supabase, userId, payload }) {
       temperature: 0.7,
       messages,
     });
+    providerResult = result;
 
     logContentTopicsGenerationDebug("sumopod_raw_response", {
       model: result.model,
@@ -407,6 +410,7 @@ async function generateContentTopics({ supabase, userId, payload }) {
       model: result.model,
       usage: result.raw?.usage || null,
     });
+    creditsSettled = true;
 
     const generationTopicLog = await createGenerationTopicLog({
       supabase,
@@ -452,11 +456,11 @@ async function generateContentTopics({ supabase, userId, payload }) {
     }
   return response;
   } catch (error) {
-    if (creditReservation) {
+    if (creditReservation && !creditsSettled) {
       try {
-        const providerUsage = error?.usage || error?.response?.usage;
+        const providerUsage = providerResult?.raw?.usage || error?.usage || error?.response?.usage;
         if (providerUsage) {
-          await aiCreditsService.settleCredits({ userId, requestId: creditReservation.requestId, feature: "topic_generation", model: process.env.SUMO_MODEL, usage: providerUsage, status: "failed" });
+          await aiCreditsService.settleCredits({ userId, requestId: creditReservation.requestId, feature: "topic_generation", model: providerResult?.model || process.env.SUMO_MODEL, usage: providerUsage, status: "failed" });
         } else {
           await aiCreditsService.releaseReservation({ userId, requestId: creditReservation.requestId });
         }

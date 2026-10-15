@@ -17,7 +17,7 @@ const threadsAccountsRoutes = require("./threadsAccountsRoutes");
 const threadsRoutes = require("./threadsRoutes");
 const paymentsRoutes = require("./paymentsRoutes");
 const notificationsRoutes = require("./notificationsRoutes");
-const adminRoutes = require("./adminRoutes");
+const adminRoutes = require("./admin/adminRoutes");
 
 const router = express.Router();
 

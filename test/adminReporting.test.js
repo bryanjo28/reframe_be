@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 require("dotenv").config();
 
-const adminService = require("../src/services/adminService");
+const adminService = require("../src/services/admin/adminService");
 const { supabaseAdmin } = require("../src/config/supabase");
 
 async function main() {

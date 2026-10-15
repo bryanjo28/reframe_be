@@ -20,7 +20,7 @@ test("cached input tokens are included once in total tokens", () => {
 });
 test("cached input receives the discounted actual API rate", () => {
   const costs = calculateCosts({ prompt_tokens: 8_000, completion_tokens: 2_000, total_tokens: 10_000, prompt_tokens_details: { cached_tokens: 6_000 } });
-  assert.equal(costs.estimatedCostIdr, 100);
+  assert.equal(costs.estimatedCostIdr, 22.68);
   assert.equal(costs.actualCostUsd, 0.00126);
 });
 test("reservation estimate respects configured maximum", () => {

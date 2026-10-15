@@ -87,6 +87,8 @@ function mapRpcError(error) {
 async function reserveCredits({ userId, feature, messages, maxTokens, requestId = crypto.randomUUID(), db = supabaseAdmin }) {
   if (!db?.rpc) throw httpError("AI credit storage belum dikonfigurasi.", 503, "AI_CREDIT_STORAGE_UNAVAILABLE");
   const estimate = estimateReservation({ messages, maxTokens });
+  // Recover abandoned work before checking available balance on a new request.
+  await recoverStaleReservations({ userId, db });
   const { data, error } = await db.rpc("reserve_ai_credits", {
     p_user_id: userId,
     p_request_id: requestId,
@@ -134,4 +136,33 @@ async function releaseReservation({ userId, requestId, reason = "provider_failed
   return data;
 }
 
-module.exports = { calculateCosts, creditsForTokens, estimateReservation, normalizeProviderUsage, releaseReservation, reserveCredits, settleCredits };
+async function recoverStaleReservations({ userId = null, db = supabaseAdmin } = {}) {
+  if (!db?.rpc) return 0;
+  const { data, error } = await db.rpc("recover_stale_ai_reservations", { p_user_id: userId });
+  if (error) throw mapRpcError(error);
+  const recovered = Number(data || 0);
+  if (recovered > 0) console.warn(`[ai-credit-recovery] released=${recovered} providerUsage=unknown`);
+  return recovered;
+}
+
+function startCreditRecovery({ db = supabaseAdmin, intervalMs = 300_000 } = {}) {
+  if (!db?.rpc) return null;
+  let running = false;
+  const recover = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await recoverStaleReservations({ db });
+    } catch (_) {
+      console.error("[ai-credit-recovery] Recovery failed; check database migration and connectivity");
+    } finally {
+      running = false;
+    }
+  };
+  void recover();
+  const timer = setInterval(recover, intervalMs);
+  timer.unref();
+  return timer;
+}
+
+module.exports = { calculateCosts, creditsForTokens, estimateReservation, normalizeProviderUsage, releaseReservation, reserveCredits, settleCredits, recoverStaleReservations, startCreditRecovery };

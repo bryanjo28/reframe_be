@@ -77,6 +77,38 @@ function createSupabaseMock({ profileRow, socialAccountRow, personaConfigRow = n
 }
 
 async function main() {
+  await run("register runs prechecks concurrently and awaits subscription with the same plan", async () => {
+    let releaseAccountCheck;
+    let planLoaded = false;
+    let subscribed = false;
+    const freePlan = { id: "free-plan", is_active: true };
+    const accountCheck = new Promise((resolve) => { releaseAccountCheck = resolve; });
+    const registration = authService.register({
+      email: "pending@example.com", password: "password123", accountName: "pending-register",
+    }, {
+      accountNameChecker: () => accountCheck,
+      freePlanLoader: async () => { planLoaded = true; return freePlan; },
+      authClient: { auth: { signUp: async () => {
+        assert.equal(planLoaded, true);
+        return { data: { user: { id: "user-123", email_confirmed_at: null }, session: null }, error: null };
+      } } },
+      subscriptionEnsurer: async ({ userId, freePlan: receivedPlan }) => {
+        assert.equal(userId, "user-123");
+        assert.equal(receivedPlan, freePlan);
+        await Promise.resolve();
+        subscribed = true;
+      },
+    });
+    await Promise.resolve();
+    const prechecksConcurrent = planLoaded;
+    releaseAccountCheck();
+    const result = await registration;
+    assert.equal(prechecksConcurrent, true);
+    assert.equal(subscribed, true);
+    assert.equal(result.emailConfirmationRequired, true);
+    assert.equal(result.session, null);
+  });
+
   await run("login retries temporary DNS failures and succeeds within the same request", async () => {
     let attempts = 0;
     const result = await authService.login({ email: "test@example.com", password: "password" }, {

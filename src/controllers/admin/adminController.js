@@ -1,4 +1,4 @@
-const adminService = require("../services/adminService");
+const adminService = require("../../services/admin/adminService");
 
 async function getOverview(req, res, next) {
   try {
