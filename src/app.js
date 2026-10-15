@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const crypto = require('node:crypto');
 
 const apiRoutes = require('./routes');
 const errorHandler = require('./middlewares/errorHandler');
@@ -7,6 +8,12 @@ const { globalApiLimiter } = require('./middlewares/rateLimiters');
 const inputSafetyMiddleware = require('./middlewares/inputSafetyMiddleware');
 
 const app = express();
+
+app.use((req, res, next) => {
+  req.requestId = crypto.randomUUID();
+  res.setHeader('X-Request-Id', req.requestId);
+  next();
+});
 
 // Keep diagnostics outside auth/CORS so rejected requests are visible too.
 app.use((req, res, next) => {
@@ -33,6 +40,9 @@ if (process.env.NODE_ENV === "production") {
 const allowedOrigins = [
   process.env.FRONTEND_URL || "http://localhost:5173",
   process.env.APP_BASE_URL || "http://localhost:3000",
+  ...(process.env.NODE_ENV === "production"
+    ? []
+    : ["http://localhost:5173", "http://127.0.0.1:5173"]),
 ].filter(Boolean);
 
 const corsOptions = {

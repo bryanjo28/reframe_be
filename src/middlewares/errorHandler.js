@@ -1,4 +1,6 @@
-function errorHandler(err, req, res, next) {
+const { recordServerError, redactMessage } = require("../services/adminErrorLogService");
+
+async function errorHandler(err, req, res, next) {
   if (err?.type === "entity.too.large") {
     return res.status(413).json({
       success: false,
@@ -15,11 +17,32 @@ function errorHandler(err, req, res, next) {
     });
   }
 
-  if (!err.status || err.status >= 500) console.error(err);
+  const statusCode = err.status || 500;
+  if (statusCode >= 500) {
+    const errorCode = /^[A-Za-z0-9_.:-]{1,100}$/.test(String(err.code || ""))
+      ? err.code
+      : "INTERNAL_SERVER_ERROR";
+    const errorName = String(err.name || "Error").replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 80) || "Error";
+    const message = redactMessage(err.message);
+    const requestId = req.requestId || require("node:crypto").randomUUID();
+
+    console.error("[api-error]", { requestId, method: req.method, path: req.path, statusCode, errorCode, errorName, message });
+    await recordServerError({
+      requestId,
+      userId: req.user?.id,
+      method: req.method,
+      path: req.path,
+      statusCode,
+      errorCode,
+      errorName,
+      message,
+    });
+  }
 
   return res.status(err.status || 500).json({
     success: false,
     ...(err.code ? { error_code: err.code } : {}),
+    ...(req.requestId ? { request_id: req.requestId } : {}),
     message: err.message || "Internal server error",
   });
 }

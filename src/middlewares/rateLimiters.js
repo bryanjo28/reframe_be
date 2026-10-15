@@ -8,6 +8,7 @@ const LIMITS = Object.freeze({
   aiGeneration: { windowMs: 15 * 60 * 1000, limit: 20 },
   threadsPublish: { windowMs: 15 * 60 * 1000, limit: 20 },
   metaDeletion: { windowMs: 60 * 60 * 1000, limit: 20 },
+  adminApi: { windowMs: 60 * 1000, limit: 60 },
 });
 
 function handler(req, res) {
@@ -40,10 +41,12 @@ const forgotPasswordLimiter = createLimiter(LIMITS.forgotPassword);
 const aiGenerationLimiter = createLimiter(LIMITS.aiGeneration, { keyGenerator: authenticatedUserKey });
 const threadsPublishLimiter = createLimiter(LIMITS.threadsPublish, { keyGenerator: authenticatedUserKey });
 const metaDeletionLimiter = createLimiter(LIMITS.metaDeletion);
+const adminApiLimiter = createLimiter(LIMITS.adminApi, { keyGenerator: authenticatedUserKey });
 
 module.exports = {
   LIMITS,
   aiGenerationLimiter,
+  adminApiLimiter,
   forgotPasswordLimiter,
   globalApiLimiter,
   loginLimiter,

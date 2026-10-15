@@ -1,10 +1,10 @@
 const crypto = require("crypto");
 const {
   AI_PRICING_USD_PER_MILLION,
-  INTERNAL_COST_IDR_PER_CREDIT,
   MAX_AI_CREDITS_PER_REQUEST,
   MAX_AI_OUTPUT_TOKENS,
   TOKENS_PER_CREDIT,
+  USD_TO_IDR_RATE,
 } = require("../config/billing");
 const { supabaseAdmin } = require("../config/supabase");
 
@@ -52,9 +52,10 @@ function calculateCosts(usage) {
     normalized.cachedInputTokens * AI_PRICING_USD_PER_MILLION.cachedInput +
     normalized.outputTokens * AI_PRICING_USD_PER_MILLION.output
   ) / 1_000_000;
+  const estimatedCostIdr = Math.round((actualCostUsd * USD_TO_IDR_RATE + Number.EPSILON) * 100) / 100;
   return {
     actualCostUsd,
-    estimatedCostIdr: creditsForTokens(normalized.totalTokens) * INTERNAL_COST_IDR_PER_CREDIT,
+    estimatedCostIdr,
   };
 }
 
