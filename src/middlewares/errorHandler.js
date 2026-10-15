@@ -27,7 +27,7 @@ async function errorHandler(err, req, res, next) {
     const requestId = req.requestId || require("node:crypto").randomUUID();
 
     console.error("[api-error]", { requestId, method: req.method, path: req.path, statusCode, errorCode, errorName, message });
-    await recordServerError({
+    void recordServerError({
       requestId,
       userId: req.user?.id,
       method: req.method,
@@ -36,6 +36,8 @@ async function errorHandler(err, req, res, next) {
       errorCode,
       errorName,
       message,
+    }).catch(() => {
+      console.error("[error-log] Unexpected persistence failure");
     });
   }
 

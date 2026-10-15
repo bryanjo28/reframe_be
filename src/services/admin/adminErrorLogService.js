@@ -33,7 +33,7 @@ async function recordServerError({ requestId, userId, method, path, statusCode, 
       error_code: safeCode(errorCode),
       error_name: String(errorName || "Error").replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 80) || "Error",
       message: redactMessage(message),
-    });
+    }).abortSignal(AbortSignal.timeout(3_000));
 
     if (error) console.error(`[error-log] persistence failed code=${safeCode(error.code)}`);
   } catch (error) {

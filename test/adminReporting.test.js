@@ -37,6 +37,40 @@ async function main() {
   } finally {
     supabaseAdmin.rpc = originalRpc;
   }
+
+  const originalFrom = supabaseAdmin.from;
+  const loginAt = "2026-10-15T08:30:00+00:00";
+  const users = [{ id: "user-a", account_name: "alpha" }, { id: "user-b", account_name: "beta" }];
+  const loginCalls = [];
+  let failLoginLookup = false;
+  supabaseAdmin.rpc = async (name, args) => {
+    if (name === "admin_user_profitability") return { data: { items: users, total: users.length }, error: null };
+    assert.equal(name, "admin_user_last_logins");
+    loginCalls.push(args.p_user_ids);
+    return failLoginLookup ? { data: null, error: { message: "lookup unavailable" } }
+      : { data: [{ user_id: "user-a", last_login_at: loginAt }, { user_id: "user-b", last_login_at: null }], error: null };
+  };
+  supabaseAdmin.from = (table) => {
+    assert.equal(table, "social_accounts");
+    return { select() { return this; }, in() { return this; }, eq: async () => ({ data: [], error: null }) };
+  };
+  try {
+    const result = await adminService.getUsers({});
+    assert.equal(result.items[0].lastLoginAt, loginAt);
+    assert.ok(Number.isFinite(Date.parse(result.items[0].lastLoginAt)));
+    assert.equal(result.items[1].lastLoginAt, null);
+    assert.deepEqual(loginCalls, [["user-a", "user-b"]]);
+    failLoginLookup = true;
+    await assert.rejects(adminService.getUsers({}), { status: 503, code: "ADMIN_DATA_UNAVAILABLE" });
+    users.length = 0;
+    const callCount = loginCalls.length;
+    assert.deepEqual((await adminService.getUsers({})).items, []);
+    assert.equal(loginCalls.length, callCount);
+    console.log("ok - admin user list exposes batch Auth lastLoginAt, preserves null and surfaces lookup failures");
+  } finally {
+    supabaseAdmin.rpc = originalRpc;
+    supabaseAdmin.from = originalFrom;
+  }
 }
 
 main().catch((error) => {

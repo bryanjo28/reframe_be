@@ -6,6 +6,7 @@ const {
   forgotPasswordLimiter,
   loginLimiter,
   registerLimiter,
+  resendVerificationLimiter,
 } = require("../middlewares/rateLimiters");
 const {
   validateLoginRequest,
@@ -28,6 +29,7 @@ router.post(
 router.post("/login", loginLimiter, validateLoginRequest, authController.login);
 router.post(
   "/resend-verification",
+  resendVerificationLimiter,
   validateResendVerificationRequest,
   authController.resendVerificationEmail
 );

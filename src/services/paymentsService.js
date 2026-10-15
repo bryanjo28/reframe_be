@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { withRequestTimeout } = require("../utils/requestTimeout");
 const { supabaseAdmin, isSupabaseAdminConfigured } = require("../config/supabase");
 
 function httpError(message,status=500,code){const e=new Error(message);e.status=status;if(code)e.code=code;return e;}
@@ -30,8 +31,10 @@ function midtransConfig(){
 }
 async function midtransRequest(url,options={}){
   const {serverKey}=midtransConfig();if(!serverKey)throw httpError("Midtrans belum dikonfigurasi.",503,"MIDTRANS_NOT_CONFIGURED");
-  const response=await fetch(url,{...options,headers:{Authorization:`Basic ${Buffer.from(`${serverKey}:`).toString("base64")}`,Accept:"application/json","Content-Type":"application/json",...(options.headers||{})}});
+  return withRequestTimeout(async (signal) => {
+  const response=await fetch(url,{...options,signal,headers:{Authorization:`Basic ${Buffer.from(`${serverKey}:`).toString("base64")}`,Accept:"application/json","Content-Type":"application/json",...(options.headers||{})}});
   const data=await response.json().catch(()=>({}));if(!response.ok)throw httpError(data.status_message||"Midtrans request gagal.",502,"MIDTRANS_ERROR");return data;
+  });
 }
 
 async function createOrder(userId,packageId){

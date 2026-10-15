@@ -1198,6 +1198,8 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
   let promptTemplate = null;
   let resolvedPersonaConfigId = workingInput.personaConfigId || null;
   let creditReservation = null;
+  let providerResult = null;
+  let creditsSettled = false;
 
   try {
     resolvedPersonaConfigId = resolvedPersonaConfigId || topic.persona_config_id;
@@ -1283,6 +1285,7 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
       temperature: workingInput.temperature || 0.5,
       messages,
     });
+    providerResult = aiResult;
 
     const generatedContent = String(aiResult.content || "").trim() || buildDefaultDraft({
       persona,
@@ -1306,6 +1309,7 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
       model: aiResult.model,
       usage: aiResult.raw?.usage || null,
     });
+    creditsSettled = true;
 
     const usage = aiResult?.raw?.usage || {};
 
@@ -1394,15 +1398,15 @@ async function generateContentOutputForTopic({ supabase, userId, input, topic, s
       personaConfigId: resolvedPersonaConfigId,
     };
   } catch (error) {
-    if (creditReservation) {
+    if (creditReservation && !creditsSettled) {
       try {
-        const providerUsage = error?.usage || error?.response?.usage;
+        const providerUsage = providerResult?.raw?.usage || error?.usage || error?.response?.usage;
         if (providerUsage) {
           await aiCreditsService.settleCredits({
             userId,
             requestId: creditReservation.requestId,
             feature: workingInput.regenerate ? "regeneration" : "content_generation",
-            model: process.env.SUMO_MODEL,
+            model: providerResult?.model || process.env.SUMO_MODEL,
             usage: providerUsage,
             status: "failed",
           });

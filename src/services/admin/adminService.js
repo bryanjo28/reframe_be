@@ -126,10 +126,16 @@ async function getUsers({ query = "", plan = "", status = "", from, to, page = 1
   let items = report?.items || [];
   if (status) items = items.filter((item) => (status === "active" ? item.plan_code !== "free" : item.plan_code === "free"));
   const ids = items.map((item) => item.id);
-  const { data: accounts, error } = ids.length
-    ? await db.from("social_accounts").select("user_id,expires_at").in("user_id", ids).eq("platform", "threads")
-    : { data: [], error: null };
-  throwDataError(error);
+  const [accountsResult, loginsResult] = await Promise.all([
+    ids.length
+    ? db.from("social_accounts").select("user_id,expires_at").in("user_id", ids).eq("platform", "threads")
+    : { data: [], error: null },
+    ids.length ? db.rpc("admin_user_last_logins", { p_user_ids: ids }) : { data: [], error: null },
+  ]);
+  throwDataError(accountsResult.error);
+  throwDataError(loginsResult.error);
+  const accounts = accountsResult.data;
+  const lastLogins = new Map((loginsResult.data || []).map((row) => [row.user_id, row.last_login_at]));
   const connected = new Set((accounts || []).filter((row) => !row.expires_at || new Date(row.expires_at) > new Date()).map((row) => row.user_id));
   return {
     ...report,
@@ -137,6 +143,7 @@ async function getUsers({ query = "", plan = "", status = "", from, to, page = 1
       ...row,
       name: row.full_name || row.account_name,
       accountName: row.account_name,
+      lastLoginAt: lastLogins.get(row.id) || null,
       plan: row.plan_name,
       planCode: row.plan_code,
       subscriptionStatus: row.plan_code === "free" ? "free" : "active",
@@ -188,7 +195,7 @@ async function getUserDetails({ userId, from, to } = {}) {
   if (!(lots.data || []).length) creditTotals.totalAvailable = Number(legacyWallet.data?.balance || 0);
   const user = emailResult?.data?.user;
   return {
-    profile: { ...profileResult.data, email: user?.email || null },
+    profile: { ...profileResult.data, email: user?.email || null, lastLoginAt: user?.last_sign_in_at || null },
     profitability: report?.items?.[0] || null,
     credits: creditTotals,
     activity: {

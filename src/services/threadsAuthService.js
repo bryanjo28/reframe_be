@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { withRequestTimeout } = require("../utils/requestTimeout");
 
 const threadsConfig = require("../config/threads");
 const { isSupabaseAdminConfigured, supabaseAdmin } = require("../config/supabase");
@@ -63,7 +64,9 @@ function buildUrl(baseUrl, params) {
 }
 
 async function requestJson(url, options = {}) {
+  return withRequestTimeout(async (signal) => {
   const response = await fetch(url, {
+    signal,
     method: options.method || "GET",
     headers: {
       Accept: "application/json",
@@ -93,6 +96,7 @@ async function requestJson(url, options = {}) {
   }
 
   return { data };
+  });
 }
 
 function getDisplayUsername(threadsUser) {

@@ -5,6 +5,7 @@ const {
   aiGenerationLimiter,
   loginLimiter,
   metaDeletionLimiter,
+  resendVerificationLimiter,
 } = require("../src/middlewares/rateLimiters");
 
 async function withServer(configure, test) {
@@ -24,6 +25,7 @@ async function main() {
   assert.deepEqual(LIMITS.login, { windowMs: 15 * 60 * 1000, limit: 10 });
   assert.deepEqual(LIMITS.register, { windowMs: 60 * 60 * 1000, limit: 5 });
   assert.deepEqual(LIMITS.forgotPassword, { windowMs: 60 * 60 * 1000, limit: 5 });
+  assert.deepEqual(LIMITS.resendVerification, { windowMs: 60 * 60 * 1000, limit: 5 });
   assert.deepEqual(LIMITS.aiGeneration, { windowMs: 15 * 60 * 1000, limit: 20 });
   assert.deepEqual(LIMITS.threadsPublish, { windowMs: 15 * 60 * 1000, limit: 20 });
   assert.deepEqual(LIMITS.metaDeletion, { windowMs: 60 * 60 * 1000, limit: 20 });
@@ -68,6 +70,17 @@ async function main() {
       assert.equal((await fetch(`${baseUrl}/delete`, { method: "POST" })).status, 200);
     }
     assert.equal((await fetch(`${baseUrl}/delete`, { method: "POST" })).status, 429);
+  });
+
+  await withServer((app) => {
+    app.post('/resend', resendVerificationLimiter, (_req, res) => res.sendStatus(200));
+  }, async (baseUrl) => {
+    for (let index = 0; index < 5; index += 1) {
+      assert.equal((await fetch(`${baseUrl}/resend`, { method: 'POST' })).status, 200);
+    }
+    const blocked = await fetch(`${baseUrl}/resend`, { method: 'POST' });
+    assert.equal(blocked.status, 429);
+    assert.equal((await blocked.json()).error_code, 'RATE_LIMIT_EXCEEDED');
   });
 
   console.log("ok - sensitive endpoint rate limiters enforce IP and user buckets");

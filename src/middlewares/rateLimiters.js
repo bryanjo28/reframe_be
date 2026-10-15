@@ -5,6 +5,7 @@ const LIMITS = Object.freeze({
   login: { windowMs: 15 * 60 * 1000, limit: 10 },
   register: { windowMs: 60 * 60 * 1000, limit: 5 },
   forgotPassword: { windowMs: 60 * 60 * 1000, limit: 5 },
+  resendVerification: { windowMs: 60 * 60 * 1000, limit: 5 },
   aiGeneration: { windowMs: 15 * 60 * 1000, limit: 20 },
   threadsPublish: { windowMs: 15 * 60 * 1000, limit: 20 },
   metaDeletion: { windowMs: 60 * 60 * 1000, limit: 20 },
@@ -38,6 +39,7 @@ const globalApiLimiter = createLimiter(LIMITS.global);
 const loginLimiter = createLimiter(LIMITS.login);
 const registerLimiter = createLimiter(LIMITS.register);
 const forgotPasswordLimiter = createLimiter(LIMITS.forgotPassword);
+const resendVerificationLimiter = createLimiter(LIMITS.resendVerification);
 const aiGenerationLimiter = createLimiter(LIMITS.aiGeneration, { keyGenerator: authenticatedUserKey });
 const threadsPublishLimiter = createLimiter(LIMITS.threadsPublish, { keyGenerator: authenticatedUserKey });
 const metaDeletionLimiter = createLimiter(LIMITS.metaDeletion);
@@ -52,5 +54,6 @@ module.exports = {
   loginLimiter,
   metaDeletionLimiter,
   registerLimiter,
+  resendVerificationLimiter,
   threadsPublishLimiter,
 };
