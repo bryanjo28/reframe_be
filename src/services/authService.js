@@ -5,6 +5,7 @@
   isSupabaseConfigured,
   supabase,
   supabaseAdmin,
+  updatePasswordWithAccessToken,
 } = require("../config/supabase");
 const { isDisposable } = require("detect-disposable-email");
 
@@ -998,19 +999,18 @@ async function changePassword({ user, supabase, currentPassword, newPassword, co
   };
 }
 
-async function resetPassword({ supabase, newPassword, confirmPassword }) {
+async function resetPassword({ accessToken, newPassword, confirmPassword }, dependencies = {}) {
   const normalizedInput = normalizePasswordChangePayload({
     newPassword,
     confirmPassword,
   });
   assertValidPasswordResetPayload(normalizedInput);
 
-  const { data, error } = await supabase.auth.updateUser({
-    password: normalizedInput.newPassword,
-  });
+  const passwordUpdater = dependencies.passwordUpdater || updatePasswordWithAccessToken;
+  const { data, error } = await passwordUpdater(accessToken, normalizedInput.newPassword);
 
   if (error) {
-    throw createHttpError(error.message, 400, error);
+    throw createHttpError(error.message, error.status || 400, error, error.code || "PASSWORD_RESET_FAILED");
   }
 
   return { user: data.user };

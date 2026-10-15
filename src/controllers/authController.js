@@ -61,7 +61,7 @@ async function forgotPassword(req, res, next) {
 async function resetPassword(req, res, next) {
   try {
     const result = await authService.resetPassword({
-      supabase: req.supabase,
+      accessToken: req.accessToken,
       newPassword: req.body.newPassword,
       confirmPassword: req.body.confirmPassword,
     });

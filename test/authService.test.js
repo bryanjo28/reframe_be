@@ -481,9 +481,14 @@ async function main() {
     };
 
     const result = await authService.resetPassword({
-      supabase: userClient,
+      accessToken: "recovery-token",
       newPassword: "new-password",
       confirmPassword: "new-password",
+    }, {
+      passwordUpdater: async (token, password) => {
+        assert.equal(token, "recovery-token");
+        return userClient.auth.updateUser({ password });
+      },
     });
 
     assert.deepEqual(receivedPayload, { password: "new-password" });
