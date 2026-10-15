@@ -466,7 +466,8 @@ async function publishTextThread({
       params: {
         media_type: "TEXT",
         text: content,
-        reply_control: replyControl,
+        // Temporarily omitted: explicitly setting reply_control triggers Meta permission error 10.
+        // reply_control: replyControl,
         reply_to_id: replyToId,
       },
     });
