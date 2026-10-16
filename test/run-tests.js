@@ -11,6 +11,7 @@ require("./failedTopicRelease.test");
 require("./contentPillarsValidation.test");
 require("./contentPillarsRoutes.test");
 require("./contentTopicsGeneration.test");
+require("./contentTopicsUpdate.test");
 require("./personaConfigsValidation.test");
 require("./authService.test");
 require("./authSubscriptionAssignment.test");

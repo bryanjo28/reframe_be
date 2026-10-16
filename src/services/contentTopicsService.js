@@ -35,7 +35,11 @@ function readOptionalText(source, keys) {
   const matchedKey = keys.find((key) => Object.prototype.hasOwnProperty.call(source, key));
   const value = source[matchedKey];
 
-  if (value === undefined || value === null) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
     return null;
   }
 
