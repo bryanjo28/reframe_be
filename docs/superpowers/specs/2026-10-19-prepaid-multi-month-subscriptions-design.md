@@ -4,7 +4,7 @@
 
 Add manual, prepaid subscription purchases for 1, 3, 6, or 12 months through Pakasir. A successful payment reserves consecutive monthly subscription periods. Only one period is active at a time, and each period grants one month's AI credits when it starts. A purchase made while a paid subscription is active is queued after all previously paid periods; it never removes time or credits already purchased. Credit top-ups keep their current immediate-settlement behavior.
 
-This first version uses linear pricing (`monthly price * duration`) and does not include pending-order cancellation or deletion.
+This first version uses linear pricing (`monthly price * duration`). Pending Pakasir orders use the provider's `expired_at` as the authoritative deadline and are automatically reconciled; order rows are retained for audit.
 
 ## Goals
 
@@ -16,6 +16,7 @@ This first version uses linear pricing (`monthly price * duration`) and does not
 - Make payment settlement and monthly activation safe under duplicate webhooks, polling, retries, and concurrent requests.
 - Expose the active subscription and future paid periods to the user.
 - Continue functioning when an in-process Render cron is asleep by reconciling due periods on relevant authenticated requests.
+- Persist Pakasir's transaction ID and expiry, then automatically cancel provider transactions that remain pending at their provider-defined deadline.
 
 ## Non-goals
 
@@ -23,7 +24,7 @@ This first version uses linear pricing (`monthly price * duration`) and does not
 - Discounts for longer durations.
 - Proration, immediate upgrades, or immediate downgrades.
 - Refunds or partial cancellations after payment.
-- Automatic cancellation or deletion of pending payment orders.
+- Manual cancellation controls and deletion of payment orders.
 - Changes to top-up expiry or settlement.
 
 ## Product Rules
@@ -37,6 +38,8 @@ This first version uses linear pricing (`monthly price * duration`) and does not
 7. Subscription credits are valid only for that period. When the next period activates, unused free/subscription credits from the previous period expire. Top-up credits are not expired.
 8. A plan snapshot on the order and contract is authoritative for price and monthly credits. Renaming, repricing, deactivating, or editing the catalog later does not alter an already-paid contract.
 9. A payment order may create at most one contract, and a contract period may grant credits at most once.
+10. Pakasir's `expired_at` is the only payment countdown deadline. The application does not impose its own 30-minute timeout.
+11. A due order is checked with Pakasir before cancellation. A completed payment is settled; an already canceled payment is synchronized; only a still-pending transaction is sent to Pakasir's cancel endpoint.
 
 ## Data Model
 
@@ -45,6 +48,9 @@ This first version uses linear pricing (`monthly price * duration`) and does not
 - `duration_months integer`: nullable for legacy/top-up orders; constrained to `1,3,6,12` for subscription orders.
 - `monthly_price_idr bigint`: the monthly price captured at checkout.
 - `monthly_credits integer`: the monthly credit grant captured at checkout.
+- `provider_expires_at timestamptz`: Pakasir's captured `expired_at` value.
+- `cancelled_at timestamptz`: local terminal transition time.
+- `cancellation_reason text`: `provider_expired` for this version.
 
 `amount_idr` remains the final amount sent to Pakasir and equals `monthly_price_idr * duration_months` in this version.
 
@@ -106,7 +112,7 @@ The existing generic subscription-credit trigger must not grant catalog credits 
 }
 ```
 
-For backward compatibility, omitted `durationMonths` defaults to `1`. The service validates the duration, loads the active plan, calculates the total, validates the payment-method amount limits against that total, and writes the complete snapshot to `payment_orders` before contacting Pakasir.
+For backward compatibility, omitted `durationMonths` defaults to `1`. The service validates the duration, loads the active plan, calculates the total, validates the payment-method amount limits against that total, and writes the complete snapshot to `payment_orders` before contacting Pakasir. A successful provider response must contain a valid `txn_id` and `expired_at`; both are persisted as `provider_reference` and `provider_expires_at`.
 
 When Pakasir reports `completed`, a database settlement function runs in one transaction:
 
@@ -121,6 +127,22 @@ When Pakasir reports `completed`, a database settlement function runs in one tra
 A repeated webhook or polling request returns the existing result without creating another contract, period, or credit grant.
 
 Unlike top-ups, settling a multi-month subscription does not insert one credit transaction for all months. Each period activation writes its own `subscription_grant` transaction.
+
+## Pending Payment Expiry
+
+`GET /api/payments/orders/:id` remains the frontend polling endpoint. Its response includes `providerExpiresAt`, allowing the frontend to show the provider-defined countdown and stop polling on `paid` or `cancelled`.
+
+When an order is still pending at or after `provider_expires_at`, the backend performs this sequence:
+
+1. Fetch fresh transaction status from Pakasir.
+2. If `completed`, run normal settlement and return `paid`.
+3. If `canceled`, atomically mark the local order `cancelled`.
+4. If still `pending`, call `POST /api/v2/cancel-transaction/{slug}/{txn_id}` and then atomically mark the local order `cancelled` with reason `provider_expired`.
+5. If the provider cancel request fails, keep the order pending so cron or later polling can retry.
+
+The Pakasir client rate-limits cancellation to two requests per second per Node process. The local cancellation transition locks the order and refuses to overwrite `paid` or any other terminal state, preventing a concurrent successful webhook from being changed to cancelled. Repeated reconciliation of a cancelled order returns its existing terminal state successfully.
+
+No user-triggered cancel endpoint or button is included. A checkout that never obtained a `provider_reference` has no authoritative Pakasir expiry and remains eligible for the existing same-order checkout retry rather than automatic provider cancellation.
 
 ## Monthly Activation
 
@@ -142,6 +164,7 @@ If the service wakes after multiple completely missed periods, those historical 
 ## Activation Triggers and Render Sleep
 
 - Extend the existing cron runner to call the batch reconciliation function every minute when `CRON_JOB=true`.
+- The cron runner also claims a bounded batch of pending payment orders whose `provider_expires_at <= now()` and runs provider reconciliation/cancellation.
 - Call user reconciliation before returning subscription/payment-page data and before paid-plan/AI entitlement checks.
 - Database uniqueness and advisory locks make concurrent cron, webhook, polling, and user requests safe.
 
@@ -157,7 +180,7 @@ The request-time fallback is required because an in-process cron does not run wh
 - `queued`: future contracts/periods in chronological order.
 - `coverageEndsAt`: end of all currently paid subscription coverage.
 
-`GET /api/payments/me` includes `durationMonths`, `monthlyCredits`, and contract activation dates for subscription orders. Existing clients continue to work because current fields remain unchanged.
+`GET /api/payments/me` includes `durationMonths`, `monthlyCredits`, `providerExpiresAt`, and contract activation dates for subscription orders. Existing clients continue to work because current fields remain unchanged.
 
 ## Error Handling
 
@@ -167,6 +190,8 @@ The request-time fallback is required because an in-process cron does not run wh
 - Database settlement failure: webhook returns an error so Pakasir can retry; polling surfaces the failure without marking the order paid.
 - Activation failure: the period remains scheduled and can be retried by cron or the next request.
 - Duplicate settlement/activation: return the existing state as success.
+- Provider cancellation failure: retain `pending`, return a retryable gateway error, and let later polling/cron retry.
+- Cancellation racing with settlement: the database lock preserves whichever valid terminal provider outcome is confirmed; cancellation never overwrites `paid`.
 
 ## Migration and Compatibility
 
@@ -191,6 +216,11 @@ Database/integration coverage:
 - A delayed wake-up skips expired grants and activates only the current period.
 - Existing one-month clients work when `durationMonths` is omitted.
 - Top-up tests continue to pass unchanged.
+- Provider `expired_at` is persisted and returned for frontend countdowns.
+- Due completed payments settle instead of being cancelled.
+- Due pending payments call provider cancel once and become locally cancelled.
+- Failed provider cancellation remains pending and is retryable.
+- Concurrent cancellation/settlement and duplicate expiry reconciliation preserve one terminal state.
 
 Service/API coverage:
 

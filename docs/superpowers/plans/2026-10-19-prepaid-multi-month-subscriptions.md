@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Support prepaid 1/3/6/12-month Pakasir subscriptions that queue behind existing paid coverage and release captured AI credits once per monthly period.
+**Goal:** Support prepaid 1/3/6/12-month Pakasir subscriptions that queue behind existing paid coverage, release captured AI credits once per monthly period, and automatically reconcile orders at Pakasir's provider-defined expiry.
 
 **Architecture:** PostgreSQL owns contract creation, period scheduling, and idempotent activation under a per-user advisory lock. The Node service snapshots duration/price/credits on each payment order, invokes the database settlement RPC after Pakasir verification, and reconciles due periods from cron plus entitlement reads so Render sleep cannot strand a subscription.
 
@@ -18,7 +18,9 @@
 - Credits are granted once per due monthly period from the order snapshot, never all at settlement.
 - Top-up settlement, balances, expiry, and eligibility remain unchanged.
 - Duplicate webhook, polling, cron, and request-time reconciliation must not duplicate contracts, periods, lots, or ledger entries.
-- Pending-payment cancellation/deletion, discounts, refunds, proration, and recurring charges remain out of scope.
+- Manual pending-payment cancellation, payment-row deletion, discounts, refunds, proration, and recurring charges remain out of scope.
+- There is no manual cancel endpoint; automatic expiry uses Pakasir's captured `expired_at`, never an application-defined timeout.
+- Payment-order rows are retained after cancellation for audit.
 
 ## Review Focus
 
@@ -26,7 +28,7 @@
 - A multi-month total that exceeds the chosen QRIS/VA limit must fail before an order row or Pakasir transaction is created; Task 2 pins call ordering.
 - Existing paid coverage ending exactly at settlement time must not create overlapping periods; Task 1 tests database boundary selection under the advisory lock.
 - Catalog price/credit changes after checkout must not alter settlement or activation; Tasks 1 and 2 assert snapshot use.
-- When cron wakes several months late, expired periods must not create spendable credits while the currently due period does; Task 1 covers catch-up behavior.
+- A payment completing at its expiry boundary must settle as paid instead of being overwritten by cancellation; Tasks 1, 2, and 4 test the race-safe transition.
 
 ---
 
@@ -42,10 +44,11 @@
 - Produces RPC `reconcile_user_subscription_periods(p_user_id uuid, p_now timestamptz default now()) -> jsonb`.
 - Produces RPC `reconcile_due_subscription_periods(p_now timestamptz default now(), p_limit integer default 100) -> jsonb`.
 - Produces tables `subscription_contracts` and `subscription_periods`, plus payment-order snapshot columns from the spec.
+- Produces RPC `mark_expired_pakasir_order_cancelled(p_order_id uuid, p_provider_reference text, p_reason text) -> jsonb` that locks the order and never overwrites `paid`.
 
 - [ ] **Step 1: Write the failing migration contract test**
 
-Create assertions that the migration contains exact duration constraints, unique `payment_order_id`, unique `(contract_id, sequence_number)`, user advisory locking, snapshot-based credit insertion, idempotency keys, top-up preservation, all three RPCs, and a catch-up branch that completes expired periods without granting their credits. Assert the test is included in `npm test`.
+Create assertions that the migration contains exact duration constraints, `provider_expires_at`/`cancelled_at`/`cancellation_reason`, unique `payment_order_id`, unique `(contract_id, sequence_number)`, user advisory locking, snapshot-based credit insertion, idempotency keys, top-up preservation, all reconciliation RPCs, a paid-safe cancellation RPC, and a catch-up branch that completes expired periods without granting their credits. Assert the test is included in `npm test`.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -62,6 +65,7 @@ Implement the migration with:
 - an updated settlement RPC that preserves the top-up branch but creates contracts/periods for subscription orders;
 - an activation RPC that projects the current period into `user_subscriptions`, explicitly inserts the captured credit lot and `subscription_grant` transaction, and prevents the legacy paid-plan trigger from granting catalog values;
 - a bounded batch reconciliation RPC for cron;
+- a cancellation transition RPC that checks `provider_reference`, locks the row, is idempotent for `cancelled`, and returns rather than overwrites an already `paid` order;
 - service-role-only execution grants and authenticated read policies limited to the owning user.
 
 Use one user-scoped advisory lock in both settlement and reconciliation. Compute each period as `start + make_interval(months => sequence_number)` from a fixed contract start, rather than repeatedly adding a month, so month-end drift is deterministic.
@@ -82,12 +86,14 @@ git commit -m "feat: add prepaid subscription contract schema"
 ### Task 2: Duration-Aware Pakasir Order Creation
 
 **Files:**
+- Modify: `src/services/pakasirService.js`
 - Modify: `src/services/pakasirPaymentsService.js`
 - Modify: `src/services/paymentsService.js`
 - Modify: `test/pakasirPayments.test.js`
 
 **Interfaces:**
 - Consumes the new `payment_orders` columns and existing `gateway.create(orderId, amount, method)`.
+- Extends the Pakasir client with `cancel(txnId) -> Promise<{message:string}>`, throttled to at most two starts per second per process.
 - Produces `normalizeDurationMonths(value) -> 1|3|6|12` inside `pakasirPaymentsService.js` (exported only through `createPaymentsService` behavior).
 - Produces subscription order fields `duration_months`, `monthly_price_idr`, `monthly_credits`, and total `amount_idr`.
 
@@ -101,6 +107,8 @@ Extend `test/pakasirPayments.test.js` to assert:
 - client `amount` and `credits` cannot override snapshots;
 - a multiplied amount outside method limits fails before insert and before `gateway.create`;
 - top-up input ignores/rejects `durationMonths` consistently (choose rejection with HTTP 400 to keep the API unambiguous).
+- provider `expired_at` is required, validated as a timestamp, stored as `provider_expires_at`, and returned as `providerExpiresAt`;
+- concurrent `cancel()` calls obey the provider's two-requests-per-second limit and reject malformed responses.
 
 - [ ] **Step 2: Run the focused test to verify failures**
 
@@ -110,7 +118,7 @@ Expected: FAIL on missing snapshot fields and duration validation.
 
 - [ ] **Step 3: Implement duration validation and server-side snapshots**
 
-Update `createOrder(userId, input)` so subscription orders default an omitted property to `1`, require exact integer membership when present, calculate a safe-integer total, validate the total against the selected payment method, and insert all snapshot columns. Preserve the existing top-up path and recovery response. Include camelCase duration/monthly-credit fields in returned payment data without removing existing fields.
+Update `createOrder(userId, input)` so subscription orders default an omitted property to `1`, require exact integer membership when present, calculate a safe-integer total, validate the total against the selected payment method, and insert all snapshot columns. In `pakasirService.js`, add a cancellation queue spaced by at least 510ms and the v2 cancel request. Persist validated `txn_id` and `expired_at` after checkout. Preserve the existing top-up path and recovery response. Include camelCase duration/monthly-credit/expiry fields in returned payment data without removing existing fields.
 
 - [ ] **Step 4: Run payment tests**
 
@@ -121,7 +129,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/services/pakasirPaymentsService.js src/services/paymentsService.js test/pakasirPayments.test.js
+git add src/services/pakasirService.js src/services/pakasirPaymentsService.js src/services/paymentsService.js test/pakasirPayments.test.js
 git commit -m "feat: create duration-aware subscription orders"
 ```
 
@@ -180,11 +188,12 @@ git commit -m "feat: expose prepaid subscription timeline"
 **Interfaces:**
 - Consumes `reconcileUserSubscriptionPeriods` and contract tables from Tasks 1 and 3.
 - Produces payment-page order fields `durationMonths`, `monthlyCredits`, `contractStartsAt`, and `contractEndsAt`.
+- Produces `reconcileExpiredOrder(userId, orderId, {refresh:true})` behavior through the existing `checkOrder` endpoint; no manual cancel route is added.
 - Produces settlement response `{id,status,credited,creditsAdded,balance,orderType,contractId,contractStartsAt,contractEndsAt,queued}` where applicable.
 
 - [ ] **Step 1: Write failing page and settlement tests**
 
-Assert that a completed subscription RPC result is returned without claiming the entire term was credited, queued settlement reports `queued: true`, an immediately active first period reports only one month's `creditsAdded`, duplicate settlement remains successful and uncredited, and `/payments/me` reconciles then maps snapshot/contract dates without changing top-up rows.
+Assert that a completed subscription RPC result is returned without claiming the entire term was credited, queued settlement reports `queued: true`, an immediately active first period reports only one month's `creditsAdded`, duplicate settlement remains successful and uncredited, and `/payments/me` reconciles then maps snapshot/contract dates without changing top-up rows. Add expiry cases: before deadline no cancel call; at/after deadline a fresh `completed` status settles; `canceled` synchronizes locally; fresh `pending` calls provider cancel then the cancellation RPC; cancel failure remains pending; duplicate polling is idempotent; an RPC response reporting `paid` wins the race.
 
 - [ ] **Step 2: Run focused tests to verify failures**
 
@@ -194,7 +203,7 @@ Expected: FAIL on missing contract mapping/reconciliation.
 
 - [ ] **Step 3: Implement response and payment-page mapping**
 
-Keep provider verification unchanged. Pass through the extended settlement RPC result, update the page query to include snapshot columns and contract relationships using separate bounded queries if Supabase relationship metadata is unavailable, and reconcile the requesting user before returning balances/orders.
+Keep provider identity/amount verification unchanged. Extend verification to compare the current time with `provider_expires_at`, perform a fresh status read before any cancellation, and call provider cancel only for a due still-pending transaction. Pass through the extended settlement/cancellation RPC results, update the page query to include snapshot/expiry columns and contract relationships using separate bounded queries if Supabase relationship metadata is unavailable, and reconcile the requesting user before returning balances/orders.
 
 - [ ] **Step 4: Run focused tests**
 
@@ -218,11 +227,12 @@ git commit -m "feat: integrate prepaid subscriptions with payments"
 
 **Interfaces:**
 - Consumes RPC `reconcile_due_subscription_periods(p_now, p_limit)`.
+- Claims due `payment_orders` with `provider_expires_at <= now()` in a bounded batch and feeds them through the same provider reconciliation used by polling.
 - Extends `runDueScheduledJobs(options)` with injectable `reconcileDueSubscriptions` behavior while preserving existing callers and scheduled content processing.
 
 - [ ] **Step 1: Write failing cron tests**
 
-Assert one reconciliation call per cron tick, use of a bounded limit of `100`, continued scheduled-job processing when reconciliation succeeds, isolation/logging when reconciliation fails, and no database work when Supabase admin is unconfigured.
+Assert one subscription-period reconciliation call per cron tick, a bounded due-payment query, completed/canceled/pending provider outcomes, cancel rate-limit delegation, continued scheduled-job processing when either reconciliation fails, and no database work when Supabase admin is unconfigured.
 
 - [ ] **Step 2: Run cron tests to verify failure**
 
@@ -232,7 +242,7 @@ Expected: FAIL because subscription reconciliation is not invoked.
 
 - [ ] **Step 3: Add cron reconciliation**
 
-Call the batch RPC at the beginning of a configured tick without allowing its failure to prevent existing content/thread jobs. Return or log a compact summary containing activated/completed counts; do not log payment references or secrets.
+Call subscription-period and expired-payment reconciliation at the beginning of a configured tick without allowing either failure to prevent existing content/thread jobs. Bound expired orders to `100` per tick and reuse the payment service lifecycle method instead of duplicating provider rules. Return or log compact counts; do not log payment references or secrets.
 
 - [ ] **Step 4: Run cron tests**
 
@@ -260,7 +270,7 @@ git commit -m "feat: reconcile subscription periods from cron"
 
 - [ ] **Step 1: Add failing readiness/documentation assertions**
 
-Assert that the API guide contains 1/3/6/12-month examples, monthly-credit semantics, queue semantics, and the deployment order; assert the schema snapshot contains both new tables and all payment snapshot columns.
+Assert that the API guide contains 1/3/6/12-month examples, monthly-credit semantics, queue semantics, provider-expiry countdown/polling behavior, automatic cancellation with no user button, and the deployment order; assert the schema snapshot contains both new tables and all payment snapshot/lifecycle columns.
 
 - [ ] **Step 2: Run readiness test to verify failure**
 
@@ -270,7 +280,7 @@ Expected: FAIL on missing prepaid subscription documentation/schema snapshot.
 
 - [ ] **Step 3: Update schema snapshot and Pakasir guide**
 
-Reflect the migration exactly in `full_schema.sql`. Add request/response examples and state that the migration must be applied before deploying the compatible backend. Do not document cancellation/cleanup as implemented.
+Reflect the migration exactly in `full_schema.sql`. Add request/response examples, provider-expiry countdown behavior, automatic expiry reconciliation, and state that the migration must be applied before deploying the compatible backend. Do not document a manual cancel button or payment-row cleanup as implemented.
 
 - [ ] **Step 4: Run targeted and full verification**
 
