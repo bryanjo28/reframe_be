@@ -61,7 +61,42 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 app.use(express.json({ limit: "100kb" }));
+
+
 app.use(express.urlencoded({ extended: true, limit: "100kb" }));
+
+
+const isPaymentOrderRequest = (req) =>
+  req.method === 'POST' &&
+  req.originalUrl.split('?')[0] === '/api/payments/orders';
+
+function logPaymentBody(stage, req) {
+  console.log(`[PAYMENT BE] ${stage}`, {
+    requestId: req.requestId,
+    method: req.method,
+    url: req.originalUrl,
+    contentType: req.headers['content-type'],
+    contentLength: req.headers['content-length'],
+    bodyType: typeof req.body,
+    bodyKeys:
+      req.body && typeof req.body === 'object'
+        ? Object.keys(req.body)
+        : [],
+    packageId: req.body?.packageId ?? null,
+    planId: req.body?.planId ?? null,
+    paymentMethod: req.body?.method ?? null,
+  });
+}
+
+// Cek apakah JSON parser berhasil membaca request.
+app.use((req, res, next) => {
+  if (isPaymentOrderRequest(req)) {
+    logPaymentBody('AFTER JSON PARSER', req);
+  }
+
+  next();
+});
+
 
 app.get('/', (req, res) => {
   res.json({
