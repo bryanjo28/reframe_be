@@ -43,7 +43,6 @@ async function main() {
   console.log('ok - response is sent while error log is pending and log rejection is handled');
 
   const originalFetch = global.fetch;
-  const oldKey = process.env.MIDTRANS_SERVER_KEY;
   let aborted = 0;
   const shortTimeout = { withRequestTimeout: (operation) => withRequestTimeout(operation, 5) };
   try {
@@ -59,19 +58,16 @@ async function main() {
       '../src/utils/requestTimeout': shortTimeout,
     });
     await assert.rejects(threads.getThreadsUser('test-token'), { status: 504, code: 'EXTERNAL_REQUEST_TIMEOUT' });
-    process.env.MIDTRANS_SERVER_KEY = 'test-server-key';
-    const payments = loadWithMocks('../src/services/paymentsService', {
+    const { createPakasirClient } = loadWithMocks('../src/services/pakasirService', {
       '../src/utils/requestTimeout': shortTimeout,
-      '../src/config/supabase': { isSupabaseAdminConfigured: true, supabaseAdmin: {} },
     });
-    await assert.rejects(payments.handleMidtransWebhook({ order_id: 'order-1' }), { status: 504, code: 'EXTERNAL_REQUEST_TIMEOUT' });
+    const gateway = createPakasirClient({ env: { PAKASIR_API_KEY: 'test-key', PAKASIR_SLUG: 'test' } });
+    await assert.rejects(gateway.status('txn-1'), { status: 504, code: 'EXTERNAL_REQUEST_TIMEOUT' });
     assert.equal(aborted, 2);
   } finally {
     global.fetch = originalFetch;
-    if (oldKey === undefined) delete process.env.MIDTRANS_SERVER_KEY;
-    else process.env.MIDTRANS_SERVER_KEY = oldKey;
   }
-  console.log('ok - Threads and Midtrans abort stalled response bodies with stable timeout errors');
+  console.log('ok - Threads and Pakasir abort stalled response bodies with stable timeout errors');
 
   let settleCalls = 0;
   let releaseCalls = 0;

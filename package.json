@@ -7,7 +7,7 @@
         "dev": "node --watch src/server.js",
         "start": "node src/server.js",
         "cron:run": "node scripts/run-scheduled-jobs.js",
-    "test": "node test/run-tests.js && node test/aiCreditsService.test.js && node test/securityConfig.test.js && node test/threadsTokenLifecycle.test.js && node test/threadsDeletion.test.js && node test/threadsScheduledCancellation.test.js && node test/rateLimiters.test.js && node test/requestSizeLimit.test.js && node test/adminMiddleware.test.js && node test/adminAccess.api.test.js && node test/adminReporting.test.js && node test/betaReadiness.test.js && node test/betaHardening.test.js && node test/resetPasswordRecovery.test.js"
+    "test": "node test/pakasirPayments.test.js && node test/run-tests.js && node test/aiCreditsService.test.js && node test/securityConfig.test.js && node test/threadsTokenLifecycle.test.js && node test/threadsDeletion.test.js && node test/threadsScheduledCancellation.test.js && node test/rateLimiters.test.js && node test/requestSizeLimit.test.js && node test/adminMiddleware.test.js && node test/adminAccess.api.test.js && node test/adminReporting.test.js && node test/betaReadiness.test.js && node test/betaHardening.test.js && node test/resetPasswordRecovery.test.js"
     },
     "keywords": [],
     "author": "",

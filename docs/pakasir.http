@@ -1,0 +1,87 @@
+# Pakasir v2 setup
+# 1. Run supabase/pakasir_payments_setup.sql in the Supabase SQL Editor.
+#    Prerequisites: token_wallet_payments_setup.sql + billing_credits_refactor.sql.
+#    Then run supabase/pakasir_payment_methods_setup.sql for QRIS/VA selection.
+# 2. Fill PAKASIR_API_KEY and PAKASIR_SLUG in .env, then restart the backend.
+#    Keep PAKASIR_ALLOW_SANDBOX=false in production.
+# 3. Webhook is optional. If enabled, set its URL to
+#    https://YOUR_BACKEND/api/payments/pakasir/webhook in the Pakasir project.
+#    Copy the project's webhook secret into PAKASIR_WEBHOOK_SECRET.
+# 4. Without webhook, frontend MUST poll GET /orders/:id every >=5 seconds
+#    while payment is pending, and again on return from checkout. Polling
+#    verifies with Pakasir and grants credits; redirects alone grant nothing.
+#    No background reconciliation job is installed.
+# 5. Read checkoutUrl to redirect to Pakasir QRIS checkout, or render
+#    payment.qr_string with payment.total_payment and payment.expired_at.
+#    If checkoutAvailable=false, retry SAME order via POST /orders/:id/checkout.
+#    QRIS: checkoutUrl always includes qris_only=1. Redirect remains Pakasir's
+#    default browser history behavior; no custom redirect is configured.
+#    VA: checkoutUrl=null, checkoutAvailable=true; display payment.va_number,
+#    payment.payment_method, payment.total_payment and payment.expired_at.
+#    method defaults to qris; FE can send a supported bank code for VA.
+#    GET /payments/me includes paymentMethods [{code,name,minAmount,maxAmount}].
+#    The method is stored on the order and cannot be changed by retry requests.
+# 6. Plan purchases start a fresh one-month period and replace previous
+#    subscription/free credits. Topup credits remain and expire after 12 months.
+#    Only users with an active paid plan may create topup orders. Eligibility
+#    is captured at order creation; a payment already accepted is still honored
+#    if the subscription expires while checkout is pending.
+# 7. Limits are in-memory per Node process (create <=2/s, status >=4s/txn).
+#    Use one payment worker or implement a shared limiter before adding replicas.
+# Sources: https://pakasir.com/p/create-transaction
+#          https://pakasir.com/p/transaction-status
+#          https://pakasir.com/p/webhook
+
+@baseUrl = http://localhost:3000/api
+@accessToken = REPLACE_WITH_USER_ACCESS_TOKEN
+@planId = REPLACE_WITH_SUBSCRIPTION_PLAN_UUID
+@packageId = REPLACE_WITH_TOKEN_PACKAGE_UUID
+@orderId = REPLACE_WITH_RETURNED_ORDER_UUID
+
+### Buy a paid subscription. Price and credits come from the database.
+POST {{baseUrl}}/payments/orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"planId":"{{planId}}","method":"qris"}
+
+### Buy a topup (paid subscription required).
+POST {{baseUrl}}/payments/orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"packageId":"{{packageId}}"}
+
+### Buy a plan via a specific VA bank. Render the returned VA number in FE.
+POST {{baseUrl}}/payments/orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"planId":"{{planId}}","method":"bni_va"}
+
+# Supported method values (generic payment_link is not accepted):
+# qris, bri_va, bni_va, cimb_niaga_va, danamon_va, maybank_va,
+# bnc_va, bsi_va, muamalat_va, ocbc_va.
+# VA limits: IDR 10,000-50,000,000. QRIS: IDR 500-10,000,000.
+# Key response fields under data:
+# id: internal order UUID used for polling/retry
+# status: pending, paid, cancelled (stop polling when terminal)
+# order_type: subscription or topup
+# payment_method: selected method, default qris
+# amount_idr: base product price, credits: purchased AI Credits
+# checkoutAvailable: payment instructions ready; false means retry same order
+# checkoutUrl: QRIS-only link or null for VA
+# payment.txn_id: provider transaction identifier
+# payment.amount, payment.fee, payment.total_payment: provider payment totals
+# payment.qr_string: QR text (QRIS); payment.va_number: bank VA number (VA)
+# payment.expired_at: expiry timestamp
+# Poll response uses data.status="paid" for both first and duplicate success.
+# On paid, stop polling and refresh plan/balance. Never grant credits in FE.
+
+### Verify payment and apply the purchased benefits exactly once.
+GET {{baseUrl}}/payments/orders/{{orderId}}
+Authorization: Bearer {{accessToken}}
+
+### Recover checkout after a timeout; reuses the same Pakasir order.
+POST {{baseUrl}}/payments/orders/{{orderId}}/checkout
+Authorization: Bearer {{accessToken}}

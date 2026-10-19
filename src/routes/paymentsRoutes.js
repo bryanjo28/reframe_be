@@ -1,9 +1,11 @@
 const router=require("express").Router();
 const auth=require("../middlewares/authMiddleware");
 const controller=require("../controllers/paymentsController");
-router.post("/midtrans/webhook",controller.midtransWebhook);
+router.post("/pakasir/webhook",controller.pakasirWebhook);
 router.use(auth);
 router.get("/me",controller.getPage);
 router.post("/orders",controller.createOrder);
+router.get("/orders/:id",controller.checkOrder);
+router.post("/orders/:id/checkout",controller.retryCheckout);
 router.patch("/notifications/:id/read",controller.readNotification);
 module.exports=router;
