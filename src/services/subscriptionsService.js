@@ -22,11 +22,15 @@ async function getCurrentUserSubscription({ supabase, userId }) {
 
   const activeSubscription = await getActiveUserSubscription({ supabase, userId });
 
-  if (!activeSubscription) {
-    throw createHttpError("No active subscription found for this user", 404);
-  }
-
-  return activeSubscription;
+  const { getSubscriptionTimeline } = require('./subscriptionPeriodsService');
+  const timeline = await getSubscriptionTimeline({ supabase, userId });
+  return {
+    subscription: activeSubscription?.subscription || null,
+    plan: activeSubscription?.plan || null,
+    ...timeline,
+    active: timeline.active || (activeSubscription ? { ...activeSubscription.subscription, plan: activeSubscription.plan } : null),
+    coverageEndsAt: timeline.coverageEndsAt || activeSubscription?.subscription?.endsAt || null,
+  };
 }
 
 module.exports = {

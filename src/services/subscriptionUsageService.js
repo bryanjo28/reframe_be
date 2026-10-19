@@ -64,9 +64,11 @@ async function getActiveUserSubscription({ supabase, userId }) {
     throw createHttpError("Missing required field: userId", 400);
   }
 
+  const { reconcileUserSubscriptionPeriods } = require('./subscriptionPeriodsService');
+  await reconcileUserSubscriptionPeriods({ supabase, userId });
   const { data: subscriptionRow, error: subscriptionError } = await supabase
     .from("user_subscriptions")
-    .select("id, user_id, plan_id, status, started_at, ends_at, created_at, updated_at")
+    .select("id, user_id, plan_id, status, started_at, ends_at, created_at, updated_at, subscription_period_id")
     .eq("user_id", userId)
     .eq("status", "active")
     .order("started_at", { ascending: false })
@@ -100,10 +102,15 @@ async function getActiveUserSubscription({ supabase, userId }) {
     throw createHttpError("Subscription plan not found", 404);
   }
 
-  if (!planRow.is_active) {
+  if (!planRow.is_active && !subscriptionRow.subscription_period_id) {
     throw createHttpError("Subscription plan is inactive", 403);
   }
 
+  if (subscriptionRow.subscription_period_id) {
+    const { data: period, error } = await supabase.from('subscription_periods').select('monthly_credits').eq('id', subscriptionRow.subscription_period_id).eq('user_id', userId).maybeSingle();
+    if (error || !period) throw createHttpError('Subscription period unavailable', 503, error);
+    planRow.monthly_ai_credits = period.monthly_credits;
+  }
   return {
     subscription: mapUserSubscriptionRow(subscriptionRow),
     plan: mapSubscriptionPlanRow(planRow),

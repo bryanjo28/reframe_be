@@ -1,4 +1,18 @@
 # Pakasir v2 setup
+# Prepaid billing: apply supabase/migrations/20261019010000_prepaid_multi_month_subscriptions.sql
+# AFTER the setup scripts below and BEFORE deploying this backend.
+# durationMonths: 1 (default), 3, 6, 12. Total = plan.price * durationMonths.
+# Monthly credits are released per period. A new paid plan queues after existing paid coverage.
+# GET /subscriptions/me retains subscription/plan and adds active, queued, periods, coverageEndsAt.
+# GET /payments/me includes subscriptionTimeline and order durationMonths/monthlyCredits/providerExpiresAt.
+# Pakasir expired_at is persisted as provider_expires_at. FE countdown uses providerExpiresAt.
+# Poll GET /payments/orders/:id every >=5 seconds; at expiry the backend verifies status,
+# settles completed payments, or cancels remaining pending transactions via Pakasir.
+# No manual cancel button/endpoint. Stop polling only on server-confirmed paid/cancelled.
+# Keep CRON_JOB=TRUE on the worker, or invoke npm run cron:run externally for reconciliation.
+# Free Render instances sleep; request-time polling/entitlement checks catch up when awake.
+# Cancelled rows remain in the database for audit. Orders without a saved provider reference
+# can retry checkout using the same order ID; there is no invented expiry for these orders.
 # 1. Run supabase/pakasir_payments_setup.sql in the Supabase SQL Editor.
 #    Prerequisites: token_wallet_payments_setup.sql + billing_credits_refactor.sql.
 #    Then run supabase/pakasir_payment_methods_setup.sql for QRIS/VA selection.
@@ -10,7 +24,7 @@
 # 4. Without webhook, frontend MUST poll GET /orders/:id every >=5 seconds
 #    while payment is pending, and again on return from checkout. Polling
 #    verifies with Pakasir and grants credits; redirects alone grant nothing.
-#    No background reconciliation job is installed.
+#    Cron also reconciles expired payments and due subscription periods.
 # 5. Read checkoutUrl to redirect to Pakasir QRIS checkout, or render
 #    payment.qr_string with payment.total_payment and payment.expired_at.
 #    If checkoutAvailable=false, retry SAME order via POST /orders/:id/checkout.
@@ -21,8 +35,8 @@
 #    method defaults to qris; FE can send a supported bank code for VA.
 #    GET /payments/me includes paymentMethods [{code,name,minAmount,maxAmount}].
 #    The method is stored on the order and cannot be changed by retry requests.
-# 6. Plan purchases start a fresh one-month period and replace previous
-#    subscription/free credits. Topup credits remain and expire after 12 months.
+# 6. First paid purchase replaces free access; later purchases queue after paid coverage.
+#    Subscription credits expire monthly. Topup credits remain and expire after 12 months.
 #    Only users with an active paid plan may create topup orders. Eligibility
 #    is captured at order creation; a payment already accepted is still honored
 #    if the subscription expires while checkout is pending.
@@ -44,6 +58,13 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {"planId":"{{planId}}","method":"qris"}
+
+### Prepay six months. Monthly credits are not multiplied at checkout.
+POST {{baseUrl}}/payments/orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"planId":"{{planId}}","durationMonths":6,"method":"qris"}
 
 ### Buy a topup (paid subscription required).
 POST {{baseUrl}}/payments/orders

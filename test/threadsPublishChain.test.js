@@ -138,8 +138,9 @@ async function main() {
         .map(({ details }) => details.sequenceNumber),
       [1, 2, 3]
     );
-    assert.equal(logs.at(-1).message, "[Threads Chain] completed");
-    assert.equal(logs.at(-1).details.publishedCount, 3);
+    const completedLog = logs.find(({ message }) => message === '[Threads Chain] completed');
+    assert.ok(completedLog);
+    assert.equal(completedLog.details.publishedCount, 3);
   });
 
   await run("publishThreadChain validates every part before API calls", async () => {

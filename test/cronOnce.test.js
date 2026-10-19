@@ -23,6 +23,8 @@ async function main() {
       isConfigured: true,
       supabase: { from: () => query },
       throwOnQueryError: true,
+      reconcileSubscriptions: async () => {},
+      reconcilePayments: async () => {},
     });
     if (error) await assert.rejects(run, /Failed to fetch due scheduled jobs/);
     else await run();

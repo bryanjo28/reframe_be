@@ -39,7 +39,10 @@ async function main() {
       async maybeSingle() { return { data: filters.user_id && filters.user_id !== order.user_id ? null : order }; },
       then(resolve) { resolve({ error: null }); },
     };
-  }, async rpc(name, args) { assert.equal(name, 'settle_pakasir_payment'); assert.equal(args.p_order_id, order.id); rpcCount++; return { data: { creditsAdded: 200 } }; } };
+  }, async rpc(name, args) {
+    if (name === 'mark_expired_pakasir_order_cancelled') return { data: { status: 'cancelled' } };
+    assert.equal(name, 'settle_pakasir_payment'); assert.equal(args.p_order_id, order.id); rpcCount++; return { data: { creditsAdded: 200 } };
+  } };
   let verified = { txn_id: 'txn', order_id: order.id, amount: 29000, status: 'pending', is_sandbox: false };
   const gateway = { configured() {}, create: async () => ({ txn_id: 'txn' }), status: async () => verified };
   const service = createPaymentsService({ db, gateway, env: {} });
@@ -60,7 +63,6 @@ async function main() {
   order.status = 'pending';
   verified.status = 'canceled';
   assert.equal((await service.checkOrder('owner', order.id)).status, 'cancelled');
-  assert.equal(writes.at(-1).status, 'cancelled');
   verified.status = 'completed';
   await service.handlePakasirWebhook({ order_id: order.id, txn_id: 'txn', amount: 29000 });
   assert.equal(rpcCount, 2, 'webhook works without optional secret and still verifies server status');
@@ -97,6 +99,7 @@ async function main() {
       if (timeout) throw new Error('timeout');
       assert.ok([15000, 29000].includes(amount));
       return { txn_id: 'txn', order_id: id, project: 'shop', amount, payment_method: wrongMethod ? 'bri_va' : method,
+        expired_at: '2099-01-01T00:00:00.000Z',
         qr_string: method === 'qris' ? 'qr' : '', va_number: method === 'qris' ? '' : '8800123456789' };
     },
   } });

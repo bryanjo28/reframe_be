@@ -34,7 +34,7 @@ This first version uses linear pricing (`monthly price * duration`). Pending Pak
 3. A free-plan entitlement does not delay the first paid period. It is replaced when the paid period activates.
 4. An existing paid active or queued entitlement does delay the new purchase. The new contract starts immediately after the latest paid period ends.
 5. Buying the same or a different plan follows the same queue rule.
-6. Each period is one calendar-month interval from its own start timestamp, using PostgreSQL month arithmetic. For example, PostgreSQL determines the result of adding one month to a month-end timestamp consistently inside the database.
+6. Monthly boundaries use the contract's original purchase/start anniversary in UTC, with PostgreSQL month arithmetic. January 31 produces February 28/29, March 31, and so on; the final end is exactly the start plus the purchased number of months. This avoids shortening prepaid coverage after February.
 7. Subscription credits are valid only for that period. When the next period activates, unused free/subscription credits from the previous period expire. Top-up credits are not expired.
 8. A plan snapshot on the order and contract is authoritative for price and monthly credits. Renaming, repricing, deactivating, or editing the catalog later does not alter an already-paid contract.
 9. A payment order may create at most one contract, and a contract period may grant credits at most once.

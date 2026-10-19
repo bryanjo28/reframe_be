@@ -74,7 +74,7 @@ async function main() {
     return { data: name === 'recover_stale_ai_reservations' ? 0 : {}, error: null };
   } };
   await reserveCredits({ userId: 'user', feature: 'topic_generation', messages: [], maxTokens: 1200, db: creditDb });
-  assert.deepEqual(calls.map((call) => call.name), ['recover_stale_ai_reservations', 'reserve_ai_credits']);
+  assert.deepEqual(calls.map((call) => call.name), ['ensure_subscription_current', 'recover_stale_ai_reservations', 'reserve_ai_credits']);
   assert.equal(calls[0].args.p_user_id, 'user');
   await assert.rejects(recoverStaleReservations({ db: { rpc: async () => ({ error: { message: 'missing migration' } }) } }), { code: 'AI_CREDIT_TRANSACTION_FAILED' });
   console.log('ok - reservation recovers abandoned credits first and recovery errors are surfaced');

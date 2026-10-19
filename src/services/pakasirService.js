@@ -9,6 +9,8 @@ function paymentError(message, status = 502, code = 'PAKASIR_ERROR') {
 function createPakasirClient({ env = process.env, fetch: fetcher = (...args) => fetch(...args), now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
   let createQueue = Promise.resolve();
   let nextCreateAt = 0;
+  let cancelQueue = Promise.resolve();
+  let nextCancelAt = 0;
   const statuses = new Map();
   function configured() {
     if (!env.PAKASIR_API_KEY?.trim() || !env.PAKASIR_SLUG?.trim()) {
@@ -57,7 +59,21 @@ function createPakasirClient({ env = process.env, fetch: fetcher = (...args) => 
     statuses.set(txnId, entry);
     return entry.promise;
   }
-  return { configured, create, status };
+  function cancel(txnId) {
+    configured();
+    const job = cancelQueue.then(async () => {
+      if (nextCancelAt > now()) await sleep(nextCancelAt - now());
+      nextCancelAt = now() + 510;
+      const data = await request(`cancel-transaction/${encodeURIComponent(env.PAKASIR_SLUG.trim())}/${encodeURIComponent(txnId)}`, { method: 'POST' });
+      if (typeof data.message !== 'string' || !data.message.trim()) throw paymentError('Respons pembatalan Pakasir tidak valid.');
+      // A subsequent status request must observe the cancellation.
+      statuses.delete(txnId);
+      return data;
+    });
+    cancelQueue = job.catch(() => {});
+    return job;
+  }
+  return { configured, create, status, cancel };
 }
 
 module.exports = { createPakasirClient, pakasir: createPakasirClient() };

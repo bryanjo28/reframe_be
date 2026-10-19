@@ -87,6 +87,7 @@ function mapRpcError(error) {
 async function reserveCredits({ userId, feature, messages, maxTokens, requestId = crypto.randomUUID(), db = supabaseAdmin }) {
   if (!db?.rpc) throw httpError("AI credit storage belum dikonfigurasi.", 503, "AI_CREDIT_STORAGE_UNAVAILABLE");
   const estimate = estimateReservation({ messages, maxTokens });
+  await require('./subscriptionPeriodsService').reconcileUserSubscriptionPeriods({ supabase: db, userId });
   // Recover abandoned work before checking available balance on a new request.
   await recoverStaleReservations({ userId, db });
   const { data, error } = await db.rpc("reserve_ai_credits", {

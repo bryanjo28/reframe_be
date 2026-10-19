@@ -153,6 +153,7 @@ CREATE TABLE public.subscription_plans (
   price numeric NOT NULL DEFAULT 0,
   token_allowance bigint NOT NULL DEFAULT 0,
   currency text NOT NULL DEFAULT 'IDR'::text,
+  content_pillars integer NOT NULL DEFAULT 1 CHECK (content_pillars >= 0),
   CONSTRAINT subscription_plans_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.user_subscriptions (
@@ -167,6 +168,7 @@ CREATE TABLE public.user_subscriptions (
   current_period_start timestamp with time zone,
   current_period_end timestamp with time zone,
   payment_reference text,
+  subscription_period_id uuid,
   CONSTRAINT user_subscriptions_pkey PRIMARY KEY (id),
   CONSTRAINT user_subscriptions_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.subscription_plans(id),
   CONSTRAINT user_subscriptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
@@ -175,7 +177,7 @@ CREATE TABLE public.user_usage (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
   period_month date NOT NULL,
-  ai_credits_used integer NOT NULL DEFAULT 0,
+  total_tokens_used integer NOT NULL DEFAULT 0,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT user_usage_pkey PRIMARY KEY (id),
@@ -326,7 +328,7 @@ CREATE TABLE public.token_packages (
 CREATE TABLE public.payment_orders (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
-  package_id uuid NOT NULL,
+  package_id uuid,
   amount_idr bigint NOT NULL CHECK (amount_idr >= 0),
   token_amount bigint NOT NULL CHECK (token_amount > 0),
   status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'paid'::text, 'failed'::text, 'expired'::text, 'cancelled'::text, 'refunded'::text])),
@@ -337,10 +339,58 @@ CREATE TABLE public.payment_orders (
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   credits integer,
   payment_reference text,
+  order_type text,
+  plan_id uuid,
+  payment_method text,
+  duration_months integer CHECK (duration_months IN (1,3,6,12)),
+  monthly_price_idr bigint CHECK (monthly_price_idr > 0),
+  monthly_credits integer CHECK (monthly_credits > 0),
+  provider_expires_at timestamp with time zone,
+  cancelled_at timestamp with time zone,
+  cancellation_reason text,
   CONSTRAINT payment_orders_pkey PRIMARY KEY (id),
   CONSTRAINT payment_orders_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
   CONSTRAINT payment_orders_package_id_fkey FOREIGN KEY (package_id) REFERENCES public.token_packages(id)
 );
+CREATE TABLE public.subscription_contracts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  plan_id uuid NOT NULL REFERENCES public.subscription_plans(id),
+  payment_order_id uuid NOT NULL UNIQUE REFERENCES public.payment_orders(id),
+  provider_reference text NOT NULL,
+  duration_months integer NOT NULL CHECK (duration_months IN (1,3,6,12)),
+  monthly_price_idr bigint NOT NULL CHECK (monthly_price_idr > 0),
+  monthly_credits integer NOT NULL CHECK (monthly_credits > 0),
+  total_amount_idr bigint NOT NULL CHECK (total_amount_idr > 0),
+  starts_at timestamptz NOT NULL,
+  ends_at timestamptz NOT NULL CHECK (ends_at > starts_at),
+  status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','active','completed','cancelled')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE public.subscription_periods (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id uuid NOT NULL REFERENCES public.subscription_contracts(id),
+  user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  plan_id uuid NOT NULL REFERENCES public.subscription_plans(id),
+  sequence_number integer NOT NULL CHECK (sequence_number BETWEEN 1 AND 12),
+  starts_at timestamptz NOT NULL,
+  ends_at timestamptz NOT NULL CHECK (ends_at > starts_at),
+  monthly_credits integer NOT NULL CHECK (monthly_credits > 0),
+  status text NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled','active','completed','cancelled')),
+  activated_at timestamptz,
+  completed_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (contract_id, sequence_number)
+);
+ALTER TABLE public.user_subscriptions ADD CONSTRAINT user_subscriptions_period_fkey
+  FOREIGN KEY (subscription_period_id) REFERENCES public.subscription_periods(id);
+CREATE UNIQUE INDEX subscription_projection_period_unique ON public.user_subscriptions(subscription_period_id) WHERE subscription_period_id IS NOT NULL;
+CREATE UNIQUE INDEX subscription_one_active_period ON public.subscription_periods(user_id) WHERE status='active';
+CREATE INDEX subscription_due_periods ON public.subscription_periods(status,starts_at,ends_at);
+CREATE INDEX subscription_user_contracts ON public.subscription_contracts(user_id,ends_at);
+CREATE INDEX payment_due_expiry ON public.payment_orders(provider_expires_at) WHERE status='pending' AND provider='pakasir';
 CREATE TABLE public.user_notifications (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
@@ -415,4 +465,31 @@ CREATE TABLE public.ai_usage_logs (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT ai_usage_logs_pkey PRIMARY KEY (id),
   CONSTRAINT ai_usage_logs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.admin_audit_logs (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  admin_user_id uuid NOT NULL,
+  action text NOT NULL,
+  target_type text NOT NULL,
+  target_id text,
+  previous_values jsonb,
+  new_values jsonb,
+  reason text,
+  result_status text NOT NULL DEFAULT 'success'::text CHECK (result_status = ANY (ARRAY['success'::text, 'failure'::text])),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT admin_audit_logs_pkey PRIMARY KEY (id),
+  CONSTRAINT admin_audit_logs_admin_user_id_fkey FOREIGN KEY (admin_user_id) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.admin_error_logs (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  request_id uuid NOT NULL,
+  user_id uuid,
+  method text NOT NULL,
+  path text NOT NULL,
+  status_code integer NOT NULL CHECK (status_code >= 500 AND status_code <= 599),
+  error_code text NOT NULL,
+  error_name text NOT NULL,
+  message text NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT admin_error_logs_pkey PRIMARY KEY (id)
 );

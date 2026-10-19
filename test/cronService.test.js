@@ -86,6 +86,8 @@ run("content generation cron skips a job already claimed by another worker", asy
   await runDueScheduledJobs({
     isConfigured: true,
     supabase,
+    reconcileSubscriptions: async () => {},
+    reconcilePayments: async () => {},
     claimContentGenerationJob: async () => {
       claimCalls += 1;
       return null;

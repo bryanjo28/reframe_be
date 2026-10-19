@@ -12,6 +12,11 @@ async function runDueScheduledJobs({
   claimContentGenerationJob = claimScheduledContentGenerationJob,
   generateContentOutputs = autoGenerateContentOutputs,
   throwOnQueryError = false,
+  reconcileSubscriptions = async () => {
+    const { error } = await supabase.rpc('reconcile_due_subscription_periods', { p_limit: 100 });
+    if (error) throw new Error(error.message);
+  },
+  reconcilePayments = () => require('./pakasirPaymentsService').createPaymentsService({ db: supabase }).reconcileExpiredPayments(),
 } = {}) {
   if (!isConfigured || !supabase) {
     console.warn("[cron] Supabase admin not configured, skipping job run");
@@ -19,6 +24,10 @@ async function runDueScheduledJobs({
   }
 
   const nowIso = new Date().toISOString();
+  for (const [name, reconcile] of [['subscriptions', reconcileSubscriptions], ['payments', reconcilePayments]]) {
+    try { await reconcile(); }
+    catch (error) { console.error(`[cron] ${name} reconciliation failed:`, error.message); }
+  }
 
   const { data: dueJobs, error } = await supabase
     .from("scheduled_jobs")
@@ -134,11 +143,16 @@ function startCronJobs({
   }
 
   // run every minute
+  let running = false;
   const task = schedule("* * * * *", async () => {
+    if (running) return;
+    running = true;
     try {
       await runDueScheduledJobs();
     } catch (err) {
       console.error("[cron] Unexpected error:", err.message);
+    } finally {
+      running = false;
     }
   });
 
