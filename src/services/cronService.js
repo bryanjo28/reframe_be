@@ -11,6 +11,7 @@ async function runDueScheduledJobs({
   supabase = supabaseAdmin,
   claimContentGenerationJob = claimScheduledContentGenerationJob,
   generateContentOutputs = autoGenerateContentOutputs,
+  throwOnQueryError = false,
 } = {}) {
   if (!isConfigured || !supabase) {
     console.warn("[cron] Supabase admin not configured, skipping job run");
@@ -26,6 +27,7 @@ async function runDueScheduledJobs({
     .lte("next_run_at", nowIso);
 
   if (error) {
+    if (throwOnQueryError) throw new Error("Failed to fetch due scheduled jobs");
     console.error("[cron] Failed to fetch due jobs:", error.message);
     return;
   }

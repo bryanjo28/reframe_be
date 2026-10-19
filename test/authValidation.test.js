@@ -54,7 +54,7 @@ run("validateRegisterRequest normalizes request body and allows snake_case input
   const req = {
     body: {
       email: "  Register@Example.com  ",
-      password: "  secret  ",
+      password: "  Secret123  ",
       account_name: "  alpha  ",
       full_name: "  Alpha User  ",
     },
@@ -69,7 +69,7 @@ run("validateRegisterRequest normalizes request body and allows snake_case input
   assert.equal(nextCalled, true);
   assert.deepEqual(req.authInput, {
     email: "register@example.com",
-    password: "  secret  ",
+    password: "  Secret123  ",
     accountName: "alpha",
     fullName: "Alpha User",
   });
@@ -98,7 +98,7 @@ run("validateRegisterRequest allows permanent Yahoo email", () => {
   const req = {
     body: {
       email: "user@yahoo.com",
-      password: "secret123",
+      password: "Secret123",
       accountName: "alpha",
     },
   };
@@ -110,6 +110,54 @@ run("validateRegisterRequest allows permanent Yahoo email", () => {
 
   assert.equal(receivedError, undefined);
   assert.equal(req.authInput.email, "user@yahoo.com");
+});
+
+for (const [description, password] of [
+  ["fewer than 8 characters", "Sec123"],
+  ["no uppercase letter", "secret123"],
+  ["no lowercase letter", "SECRET123"],
+  ["no number", "SecretPass"],
+]) {
+  run(`validateRegisterRequest rejects a password with ${description}`, () => {
+    const req = {
+      body: {
+        email: "user@example.com",
+        password,
+        accountName: "alpha",
+      },
+    };
+    let receivedError = null;
+
+    validateRegisterRequest(req, {}, (error) => {
+      receivedError = error;
+    });
+
+    assert.ok(receivedError);
+    assert.equal(receivedError.status, 400);
+    assert.equal(receivedError.code, "WEAK_PASSWORD");
+    assert.equal(
+      receivedError.message,
+      "Password must be at least 8 characters and include uppercase, lowercase, and number"
+    );
+  });
+}
+
+run("validateRegisterRequest accepts a password meeting every requirement", () => {
+  const req = {
+    body: {
+      email: "user@example.com",
+      password: "Secret123",
+      accountName: "alpha",
+    },
+  };
+  let receivedError = null;
+
+  validateRegisterRequest(req, {}, (error) => {
+    receivedError = error;
+  });
+
+  assert.equal(receivedError, undefined);
+  assert.equal(req.authInput.password, "Secret123");
 });
 
 run("validateRegisterRequest rejects domains configured through env", () => {

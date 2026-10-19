@@ -120,6 +120,24 @@ function assertAllowedRegistrationEmail(email) {
   }
 }
 
+function assertStrongRegistrationPassword(password) {
+  const value = String(password || "");
+  const meetsRequirements =
+    value.length >= 8 &&
+    /[A-Z]/.test(value) &&
+    /[a-z]/.test(value) &&
+    /[0-9]/.test(value);
+
+  if (!meetsRequirements) {
+    throw createHttpError(
+      "Password must be at least 8 characters and include uppercase, lowercase, and number",
+      400,
+      undefined,
+      "WEAK_PASSWORD"
+    );
+  }
+}
+
 function normalizeAuthPayload(payload = {}) {
   const source = payload && typeof payload === "object" ? payload : {};
   const email = normalizeText(getFirstDefined(source, ["email"])).toLowerCase();
@@ -648,6 +666,7 @@ async function register(
 
   assertRequiredAuthFields(normalizedInput, ["email", "password", "accountName"]);
   assertAllowedRegistrationEmail(normalizedInput.email);
+  assertStrongRegistrationPassword(normalizedInput.password);
   const [, freePlan] = await Promise.all([
     timedStage("account-name", () => accountNameChecker(normalizedInput.accountName, adminClient)),
     timedStage("free-plan", () => freePlanLoader()),
@@ -1037,6 +1056,7 @@ module.exports = {
   assertAllowedRegistrationEmail,
   assertEmailConfirmed,
   assertRequiredAuthFields,
+  assertStrongRegistrationPassword,
   changePassword,
   createRegistrationError,
   ensureFreeSubscriptionForUser,

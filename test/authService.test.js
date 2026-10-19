@@ -84,7 +84,7 @@ async function main() {
     const freePlan = { id: "free-plan", is_active: true };
     const accountCheck = new Promise((resolve) => { releaseAccountCheck = resolve; });
     const registration = authService.register({
-      email: "pending@example.com", password: "password123", accountName: "pending-register",
+      email: "pending@example.com", password: "Password123", accountName: "pending-register",
     }, {
       accountNameChecker: () => accountCheck,
       freePlanLoader: async () => { planLoaded = true; return freePlan; },
@@ -162,7 +162,7 @@ async function main() {
     const result = await authService.register(
       {
         email: "pending@example.com",
-        password: "password123",
+        password: "Password123",
         accountName: "pending-register",
       },
       {
