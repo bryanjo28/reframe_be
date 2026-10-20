@@ -37,9 +37,11 @@ function createPakasirClient({ env = process.env, fetch: fetcher = (...args) => 
     const job = createQueue.then(async () => {
       if (nextCreateAt > now()) await sleep(nextCreateAt - now());
       nextCreateAt = now() + 510;
-      return request(`create-transaction/${encodeURIComponent(env.PAKASIR_SLUG.trim())}/${encodeURIComponent(orderId)}`, {
+      const payment = await request(`create-transaction/${encodeURIComponent(env.PAKASIR_SLUG.trim())}/${encodeURIComponent(orderId)}`, {
         method: 'POST', body: JSON.stringify({ method, amount }),
       });
+      // Live v2 uses expires_at; retain the documented expired_at contract internally.
+      return { ...payment, expired_at: payment.expired_at ?? payment.expires_at };
     });
     createQueue = job.catch(() => {});
     return job;

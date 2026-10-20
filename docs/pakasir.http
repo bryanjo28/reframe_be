@@ -19,6 +19,7 @@
 # GET /subscriptions/me retains subscription/plan and adds active, queued, periods, coverageEndsAt.
 # GET /payments/me includes subscriptionTimeline and order durationMonths/monthlyCredits/providerExpiresAt.
 # Pakasir expired_at is persisted as provider_expires_at. FE countdown uses providerExpiresAt.
+# Live v2 may return expires_at; the gateway client normalizes it to payment.expired_at.
 # Poll GET /payments/orders/:id every >=5 seconds; at expiry the backend verifies status,
 # settles completed payments, or cancels remaining pending transactions via Pakasir.
 # No manual cancel button/endpoint. Stop polling only on server-confirmed paid/cancelled.

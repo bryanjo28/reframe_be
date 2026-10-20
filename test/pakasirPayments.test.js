@@ -6,12 +6,20 @@ async function main() {
   await testResumableQris();
   const calls = [];
   let clock = 0;
+  let useLegacyExpiry = false;
+  const expiry = '2099-01-01T00:00:00.000Z';
   const client = createPakasirClient({
     env: { PAKASIR_API_KEY: 'secret', PAKASIR_SLUG: 'my-shop' },
     now: () => clock, sleep: async ms => { clock += ms; },
-    fetch: async (url, options) => { calls.push({ url, options, at: clock }); return { ok: true, json: async () => ({ txn_id: 'txn', status: 'pending' }) }; },
+    fetch: async (url, options) => {
+      calls.push({ url, options, at: clock });
+      return { ok: true, json: async () => ({ txn_id: 'txn', status: 'pending',
+        ...(useLegacyExpiry ? { expired_at: expiry } : { expires_at: expiry }),
+      }) };
+    },
   });
-  await Promise.all([client.create('order', 29000), client.create('order2', 29000)]);
+  const [checkout] = await Promise.all([client.create('order', 29000), client.create('order2', 29000)]);
+  assert.equal(checkout.expired_at, expiry, 'live Pakasir expires_at is normalized for checkout validation');
   assert.equal(calls[0].url, 'https://app.pakasir.com/api/v2/create-transaction/my-shop/order');
   assert.equal(calls[0].options.headers['X-Api-Key'], 'secret');
   assert.deepEqual(JSON.parse(calls[0].options.body), { method: 'qris', amount: 29000 });
@@ -25,7 +33,9 @@ async function main() {
   assert.equal(calls.length, 4);
   assert.ok(calls[3].at - lastStatusAt >= 4000, 'webhook refresh honors status cooldown');
   await assert.rejects(async () => createPakasirClient({ env: {} }).create('o', 1000), { status: 503 });
-  await client.create('va-order', 29000, 'bni_va');
+  useLegacyExpiry = true;
+  assert.equal((await client.create('va-order', 29000, 'bni_va')).expired_at, expiry,
+    'documented expired_at remains supported');
   assert.deepEqual(JSON.parse(calls.at(-1).options.body), { method: 'bni_va', amount: 29000 });
   await assert.rejects(async () => client.create('bad-method', 29000, 'payment_link'), { status: 400 });
 
@@ -170,13 +180,21 @@ async function testResumableQris() {
   }, async rpc(name) {
     return { data: name === 'settle_pakasir_payment' ? { creditsAdded: 200 } : { status: 'cancelled' } };
   } };
-  const gateway = { configured() {},
-    async create(orderId, amount, method) {
+  let providerClock = 0;
+  const providerClient = createPakasirClient({
+    env: { PAKASIR_API_KEY: 'test', PAKASIR_SLUG: 'shop' },
+    now: () => providerClock, sleep: async ms => { providerClock += ms; },
+    async fetch(url, options) {
       createCalls++;
-      return { txn_id: 'txn/a?b', order_id: orderId, project: 'shop', amount,
+      const { amount, method } = JSON.parse(options.body);
+      const orderId = decodeURIComponent(url.split('/').at(-1));
+      return { ok: true, json: async () => ({ txn_id: 'txn/a?b', order_id: orderId, project: 'shop', amount,
         payment_method: method, qr_string: method === 'qris' ? 'original-qr-payload' : '',
-        va_number: method === 'qris' ? '' : '8800123456789', expired_at: expiry };
+        va_number: method === 'qris' ? '' : '00880123456789', expires_at: expiry }),
+      };
     },
+  });
+  const gateway = { configured() {}, create: providerClient.create,
     status: async () => ({ txn_id: stored.provider_reference, order_id: stored.id,
       amount: stored.amount_idr, status: outcome, is_sandbox: false }),
   };
@@ -200,7 +218,7 @@ async function testResumableQris() {
   await service.retryCheckout('owner', created.id);
   assert.equal(stored.payment_qr_string, 'original-qr-payload');
   const vaCreated = await service.createOrder('owner', { planId: productId, method: 'bni_va' });
-  assert.equal(stored.payment_va_number, '8800123456789', 'VA is persisted as text');
+  assert.equal(stored.payment_va_number, '00880123456789', 'VA is persisted as text preserving leading zeros');
   assert.equal(stored.payment_qr_string, null);
   const va = await reloaded.checkOrder('owner', vaCreated.id);
   assert.equal(va.checkoutUrl, null);
