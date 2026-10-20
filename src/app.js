@@ -100,7 +100,7 @@ app.use((req, res, next) => {
 
 app.get('/', (req, res) => {
   res.json({
-    message: 'Threads API is running',
+    message: 'Alurin API is running',
   });
 });
 
