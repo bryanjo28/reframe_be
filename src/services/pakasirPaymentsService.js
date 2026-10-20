@@ -40,11 +40,18 @@ function createPaymentsService({ db, gateway = pakasir, env = process.env, now =
           typeof payment.va_number !== 'string' || !payment.va_number.trim())) {
       throw fail('Detail transaksi Pakasir tidak sesuai.', 502, 'PAYMENT_VERIFICATION_FAILED');
     }
-    const { error } = await database().from('payment_orders').update({ provider_reference: payment.txn_id, provider_expires_at: payment.expired_at, updated_at: new Date().toISOString() }).eq('id', order.id).eq('status', 'pending');
+    const instructions = {
+      payment_qr_string: method === 'qris' ? payment.qr_string : null,
+      payment_va_number: method === 'qris' ? null : payment.va_number,
+    };
+    const { error } = await database().from('payment_orders').update({
+      provider_reference: payment.txn_id, provider_expires_at: payment.expired_at,
+      ...instructions, updated_at: new Date().toISOString(),
+    }).eq('id', order.id).eq('status', 'pending');
     if (error) throw fail(error.message);
     return { ...order, durationMonths: order.duration_months, monthlyCredits: order.monthly_credits,
       providerExpiresAt: payment.expired_at, provider_expires_at: payment.expired_at,
-      payment_method: method, provider_reference: payment.txn_id, checkoutAvailable: true,
+      ...instructions, payment_method: method, provider_reference: payment.txn_id, checkoutAvailable: true,
       checkoutUrl: method === 'qris' ? `https://app.pakasir.com/pay-v2/${encodeURIComponent(payment.txn_id)}?qris_only=1` : null,
       checkoutToken: null, payment, message: 'Lanjutkan pembayaran melalui Pakasir.' };
   }
@@ -117,7 +124,18 @@ function createPaymentsService({ db, gateway = pakasir, env = process.env, now =
       if (error) throw fail(error.message);
       return { ...data, id: order.id, credited: false, providerExpiresAt: order.provider_expires_at };
     } else if (verified.status !== 'pending') throw fail('Status Pakasir tidak dikenal.', 502);
-    return { id: order.id, status: 'pending', credited: false, providerExpiresAt: order.provider_expires_at || null };
+    const method = order.payment_method || 'qris';
+    const qris = method === 'qris';
+    return { id: order.id, status: 'pending', credited: false,
+      providerExpiresAt: order.provider_expires_at || null, payment_method: method,
+      checkoutUrl: qris ? `https://app.pakasir.com/pay-v2/${encodeURIComponent(order.provider_reference)}?qris_only=1` : null,
+      payment: {
+        txn_id: order.provider_reference, payment_method: method, amount: Number(order.amount_idr),
+        expired_at: order.provider_expires_at || null,
+        qr_string: qris ? order.payment_qr_string || null : null,
+        va_number: qris ? null : order.payment_va_number || null,
+      },
+    };
   }
   async function reconcileExpiredPayments({ limit = 100 } = {}) {
     const { data, error } = await database().from('payment_orders').select('*')
@@ -131,7 +149,12 @@ function createPaymentsService({ db, gateway = pakasir, env = process.env, now =
     }
     return summary;
   }
-  async function checkOrder(userId, id) { return verify(await loadOrder(id, userId)); }
+  async function checkOrder(userId, id) {
+    const result = await verify(await loadOrder(id, userId));
+    // Terminal reads may contain the full database row; never offer stale payment instructions.
+    const { payment_qr_string, payment_va_number, ...detail } = result;
+    return detail.status === 'pending' ? detail : { ...detail, checkoutUrl: null, payment: null };
+  }
   async function handlePakasirWebhook(payload, secret) {
     if (env.PAKASIR_WEBHOOK_SECRET) {
       const expected = Buffer.from(env.PAKASIR_WEBHOOK_SECRET);

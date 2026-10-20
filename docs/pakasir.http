@@ -1,4 +1,17 @@
 # Pakasir v2 setup
+# Apply supabase/migrations/20261020010000_payment_order_instructions.sql before deploying.
+# Checkout stores QRIS/VA instructions in payment_orders.payment_qr_string/payment_va_number.
+# Pending GET /payments/orders/:id restores payment.qr_string or payment.va_number,
+# payment.expired_at, payment.amount, payment.txn_id, payment.payment_method,
+# providerExpiresAt and checkoutUrl (QRIS only). It reuses the original expiry.
+# GET does not restore fee/total_payment; these are available in the checkout response.
+# Legacy orders return null for missing QR/VA; QRIS checkoutUrl remains available.
+# To recover missing instructions, POST /payments/orders/:id/checkout on the same order.
+# Terminal GET returns payment=null and checkoutUrl=null. FE must stop showing instructions.
+# POST /payments/orders and POST /payments/orders/:id/checkout share 5 requests/minute/user.
+# Excess requests return 429 RATE_LIMIT_EXCEEDED with Retry-After (seconds).
+# Polling and webhooks do not consume this quota. Counters are per Node process;
+# multiple replicas require a shared rate-limit store.
 # Prepaid billing: apply supabase/migrations/20261019010000_prepaid_multi_month_subscriptions.sql
 # AFTER the setup scripts below and BEFORE deploying this backend.
 # durationMonths: 1 (default), 3, 6, 12. Total = plan.price * durationMonths.

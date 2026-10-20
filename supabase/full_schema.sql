@@ -346,6 +346,8 @@ CREATE TABLE public.payment_orders (
   monthly_price_idr bigint CHECK (monthly_price_idr > 0),
   monthly_credits integer CHECK (monthly_credits > 0),
   provider_expires_at timestamp with time zone,
+  payment_qr_string text,
+  payment_va_number text,
   cancelled_at timestamp with time zone,
   cancellation_reason text,
   CONSTRAINT payment_orders_pkey PRIMARY KEY (id),

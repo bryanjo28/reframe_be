@@ -5,6 +5,7 @@ const {
   aiGenerationLimiter,
   loginLimiter,
   metaDeletionLimiter,
+  paymentTriggerLimiter,
   resendVerificationLimiter,
 } = require("../src/middlewares/rateLimiters");
 
@@ -21,6 +22,38 @@ async function withServer(configure, test) {
 }
 
 async function main() {
+  assert.deepEqual(LIMITS.paymentTrigger, { windowMs: 60 * 1000, limit: 5 });
+  let paymentCalls = 0;
+  await withServer((app) => {
+    app.use((req, res, next) => {
+      req.user = { id: req.headers['x-test-user'] };
+      next();
+    });
+    const trigger = (req, res) => res.json({ calls: ++paymentCalls });
+    app.post('/orders', paymentTriggerLimiter, trigger);
+    app.post('/orders/:id/checkout', paymentTriggerLimiter, trigger);
+    app.get('/orders/:id', (req, res) => res.json({ status: 'pending' }));
+  }, async (baseUrl) => {
+    const headers = { 'x-test-user': 'payment-user-a' };
+    for (let index = 0; index < 5; index += 1) {
+      const path = index % 2 ? '/orders/order-a/checkout' : '/orders';
+      assert.equal((await fetch(`${baseUrl}${path}`, { method: 'POST', headers })).status, 200);
+    }
+    for (const path of ['/orders', '/orders/order-b/checkout']) {
+      const blocked = await fetch(`${baseUrl}${path}`, { method: 'POST', headers });
+      assert.equal(blocked.status, 429);
+      assert.equal((await blocked.json()).error_code, 'RATE_LIMIT_EXCEEDED');
+      const retryAfter = Number(blocked.headers.get('retry-after'));
+      assert.ok(retryAfter > 0 && retryAfter <= 60);
+    }
+    assert.equal(paymentCalls, 5);
+    assert.equal((await fetch(`${baseUrl}/orders/order-a`, { headers })).status, 200);
+    assert.equal((await fetch(`${baseUrl}/orders`, {
+      method: 'POST', headers: { 'x-test-user': 'payment-user-b' },
+    })).status, 200);
+    assert.equal(paymentCalls, 6);
+  });
+
   assert.deepEqual(LIMITS.global, { windowMs: 15 * 60 * 1000, limit: 300 });
   assert.deepEqual(LIMITS.login, { windowMs: 15 * 60 * 1000, limit: 10 });
   assert.deepEqual(LIMITS.register, { windowMs: 60 * 60 * 1000, limit: 5 });

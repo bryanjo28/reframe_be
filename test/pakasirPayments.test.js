@@ -3,6 +3,7 @@ const { createPakasirClient } = require('../src/services/pakasirService');
 const { createPaymentsService } = require('../src/services/paymentsService');
 
 async function main() {
+  await testResumableQris();
   const calls = [];
   let clock = 0;
   const client = createPakasirClient({
@@ -144,5 +145,83 @@ async function main() {
   await assert.rejects(catalogService.createOrder('owner', { planId: productId }), { status: 404 });
   assert.equal(providerCalls, 7);
   console.log('ok - Pakasir v2 configuration, throttling, polling ownership, verification and duplicate payments');
+}
+async function testResumableQris() {
+  const productId = '00000000-0000-4000-8000-000000000002';
+  const expiry = '2099-01-01T00:00:00.000Z';
+  let stored, createCalls = 0, outcome = 'pending';
+  const db = { from(table) {
+    const filters = {};
+    return {
+      select() { return this; }, eq(key, value) { filters[key] = value; return this; },
+      insert(row) { stored = { ...row }; return this; },
+      update(row) { Object.assign(stored, row); return this; },
+      single: async () => ({ data: { ...stored } }),
+      async maybeSingle() {
+        if (table === 'subscription_plans') return { data: {
+          id: productId, price: 29000, monthly_ai_credits: 200, code: 'starter', is_active: true,
+        } };
+        const missing = (filters.user_id && filters.user_id !== stored.user_id) ||
+          (filters.id && filters.id !== stored.id);
+        return { data: missing ? null : { ...stored } };
+      },
+      then(resolve) { resolve({ error: null }); },
+    };
+  }, async rpc(name) {
+    return { data: name === 'settle_pakasir_payment' ? { creditsAdded: 200 } : { status: 'cancelled' } };
+  } };
+  const gateway = { configured() {},
+    async create(orderId, amount, method) {
+      createCalls++;
+      return { txn_id: 'txn/a?b', order_id: orderId, project: 'shop', amount,
+        payment_method: method, qr_string: method === 'qris' ? 'original-qr-payload' : '',
+        va_number: method === 'qris' ? '' : '8800123456789', expired_at: expiry };
+    },
+    status: async () => ({ txn_id: stored.provider_reference, order_id: stored.id,
+      amount: stored.amount_idr, status: outcome, is_sandbox: false }),
+  };
+  const service = createPaymentsService({ db, gateway, env: { PAKASIR_SLUG: 'shop' } });
+  const created = await service.createOrder('owner', { planId: productId });
+  assert.equal(stored.payment_qr_string, 'original-qr-payload', 'checkout persists the QR payload');
+  // A fresh service instance must recover instructions from storage without creating checkout again.
+  const reloaded = createPaymentsService({ db, gateway, env: { PAKASIR_SLUG: 'shop' } });
+  const detail = await reloaded.checkOrder('owner', created.id);
+  assert.equal(detail.payment.qr_string, created.payment.qr_string);
+  assert.equal(detail.payment.expired_at, expiry);
+  assert.equal(detail.checkoutUrl, 'https://app.pakasir.com/pay-v2/txn%2Fa%3Fb?qris_only=1');
+  assert.equal(detail.providerExpiresAt, expiry);
+  assert.equal(createCalls, 1);
+  await assert.rejects(reloaded.checkOrder('stranger', created.id), { status: 404 });
+  stored.payment_qr_string = null;
+  const legacy = await reloaded.checkOrder('owner', created.id);
+  assert.equal(legacy.payment.qr_string, null);
+  assert.equal(legacy.checkoutUrl, detail.checkoutUrl);
+  assert.equal(createCalls, 1, 'legacy polling does not recreate checkout');
+  await service.retryCheckout('owner', created.id);
+  assert.equal(stored.payment_qr_string, 'original-qr-payload');
+  const vaCreated = await service.createOrder('owner', { planId: productId, method: 'bni_va' });
+  assert.equal(stored.payment_va_number, '8800123456789', 'VA is persisted as text');
+  assert.equal(stored.payment_qr_string, null);
+  const va = await reloaded.checkOrder('owner', vaCreated.id);
+  assert.equal(va.checkoutUrl, null);
+  assert.equal(va.payment.va_number, vaCreated.payment.va_number);
+  assert.equal(va.payment.qr_string, null, 'VA does not expose a stale QR payload');
+  assert.equal(va.providerExpiresAt, expiry);
+  stored.payment_method = 'qris';
+  stored.payment_qr_string = 'original-qr-payload';
+  for (const status of ['completed', 'canceled']) {
+    outcome = status;
+    const terminal = await reloaded.checkOrder('owner', stored.id);
+    assert.equal(terminal.checkoutUrl, null);
+    assert.equal(terminal.payment, null);
+  }
+  for (const status of ['paid', 'cancelled']) {
+    stored.status = status;
+    const terminal = await reloaded.checkOrder('owner', stored.id);
+    assert.equal(terminal.checkoutUrl, null);
+    assert.equal(terminal.payment, null);
+    assert.equal(terminal.payment_qr_string, undefined);
+    assert.equal(terminal.payment_va_number, undefined);
+  }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
