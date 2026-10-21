@@ -2,10 +2,6 @@ const service = require("../services/paymentsService");
 async function getPage(req, res, next) { try { res.json({ success: true, data: await service.getPaymentPageData(req.user.id) }); } catch (e) { next(e) } }
 async function createOrder(req, res, next) {
   try {
-    console.log('[createOrder] req.body:', req.body);
-    console.log('[createOrder] packageId:', req.body?.packageId);
-    console.log('[createOrder] planId:', req.body?.planId);
-
     res.status(201).json({
       success: true,
       data: await service.createOrder(req.user.id, req.body),

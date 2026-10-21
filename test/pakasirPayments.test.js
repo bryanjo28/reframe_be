@@ -94,7 +94,7 @@ async function main() {
   const catalogDb = { from(table) {
     const filters = {};
     return {
-      select() { return this; }, eq(key, value) { filters[key] = value; return this; }, lte() { return this; }, limit() { return this; }, order() { return this; },
+      select() { return this; }, eq(key, value) { filters[key] = value; return this; }, or() { return this; }, lte() { return this; }, limit() { return this; }, order() { return this; },
       async maybeSingle() {
         if (table === 'subscription_pricing_config') return { data: { singleton: true, version: 1, published: currentPricingConfig }, error: null };
         if (table === 'subscription_plans') return { data: product };

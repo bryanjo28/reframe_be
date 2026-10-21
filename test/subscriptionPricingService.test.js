@@ -9,6 +9,8 @@ async function main() {
     pro: { monthlyCredits: 1200, prices: { 1: 99000, 3: 249000, 12: 839000 } },
   };
   const config = validateConfig(DEFAULTS);
+  assert.equal(config.renewalPolicy, 'queue_after_paid_coverage');
+  assert.equal(validateConfig({ ...config, renewalPolicy: 'same_plan_only' }).renewalPolicy, 'queue_after_paid_coverage', 'legacy admin drafts normalize to the current policy');
   assert.deepEqual(config.enabledDurations, [1, 3, 12]);
   for (const [plan, definition] of Object.entries(expected)) {
     const prices = definition.prices;
@@ -25,6 +27,10 @@ async function main() {
     },
   } });
   assert.equal((await pricing.getPublished()).version, 8);
+  configRow.published = { ...config, renewalPolicy: 'same_plan_only' };
+  assert.equal((await pricing.getPublished()).renewalPolicy, 'queue_after_paid_coverage');
+  assert.deepEqual((await pricing.getPublished()).plans, config.plans);
+  configRow.published = config;
 
   const productId = '00000000-0000-4000-8000-000000000012';
   let product = { id: productId, price: 59000, monthly_ai_credits: 600, code: 'creator', is_active: true };

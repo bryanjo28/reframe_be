@@ -181,8 +181,8 @@ function createFakeSupabase({
 
     assert.match(supabase.state.planSelectedColumns, /(?:^|,\s*)content_pillars(?:,|$)/);
     assert.doesNotMatch(supabase.state.planSelectedColumns, /max_content_pillars/);
-    assert.doesNotMatch(supabase.state.planSelectedColumns, /max_threads_accounts/);
-    assert.doesNotMatch(supabase.state.planSelectedColumns, /can_schedule/);
+    assert.match(supabase.state.planSelectedColumns, /max_threads_accounts/);
+    assert.match(supabase.state.planSelectedColumns, /can_schedule/);
   });
 
   await run("consumeMonthlyAiCredits records usage when still within quota", async () => {

@@ -8,6 +8,7 @@
   updatePasswordWithAccessToken,
 } = require("../config/supabase");
 const { isDisposable } = require("detect-disposable-email");
+const { redactMessage } = require("./admin/adminErrorLogService");
 
 const LEGAL_TERMS_VERSION = "2026-10-20";
 const PRIVACY_NOTICE_VERSION = "2026-10-20";
@@ -653,17 +654,31 @@ async function register(
   const subscriptionEnsurer =
     dependencies.subscriptionEnsurer || ensureFreeSubscriptionForUser;
   const adminClient = dependencies.adminClient || supabaseAdmin;
+  const registrationLogger = dependencies.logger || console;
 
   async function timedStage(stage, operation) {
     const startedAt = performance.now();
     let status = "success";
     try {
-      return await operation();
+      const result = await operation();
+      // Supabase returns Auth errors in the response rather than throwing them.
+      // Record the provider cause before the public registration error masks it.
+      if (stage === "supabase-signup" && result?.error) {
+        status = "error";
+        const providerError = result.error;
+        registrationLogger.error("[auth-register-provider-error]", {
+          requestId: dependencies.requestId || "unknown",
+          providerStatus: Number(providerError.status) || null,
+          providerCode: /^[A-Za-z0-9_.:-]{1,100}$/.test(String(providerError.code || "")) ? providerError.code : "AUTH_PROVIDER_ERROR",
+          message: redactMessage(providerError.message),
+        });
+      }
+      return result;
     } catch (error) {
       status = "error";
       throw error;
     } finally {
-      console.log(`[auth-register] requestId=${dependencies.requestId || "unknown"} stage=${stage} status=${status} durationMs=${Math.round(performance.now() - startedAt)}`);
+      registrationLogger.log(`[auth-register] requestId=${dependencies.requestId || "unknown"} stage=${stage} status=${status} durationMs=${Math.round(performance.now() - startedAt)}`);
     }
   }
 

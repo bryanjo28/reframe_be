@@ -154,8 +154,6 @@ CREATE TABLE public.subscription_plans (
   token_allowance bigint NOT NULL DEFAULT 0,
   currency text NOT NULL DEFAULT 'IDR'::text,
   content_pillars integer NOT NULL DEFAULT 1 CHECK (content_pillars >= 0),
-  max_threads_accounts integer NOT NULL DEFAULT 1 CHECK (max_threads_accounts >= 0),
-  can_schedule boolean NOT NULL DEFAULT true,
   CONSTRAINT subscription_plans_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.user_subscriptions (
@@ -173,7 +171,8 @@ CREATE TABLE public.user_subscriptions (
   subscription_period_id uuid,
   CONSTRAINT user_subscriptions_pkey PRIMARY KEY (id),
   CONSTRAINT user_subscriptions_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.subscription_plans(id),
-  CONSTRAINT user_subscriptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
+  CONSTRAINT user_subscriptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
+  CONSTRAINT user_subscriptions_subscription_period_id_fkey FOREIGN KEY (subscription_period_id) REFERENCES public.subscription_periods(id)
 );
 CREATE TABLE public.user_usage (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -344,57 +343,20 @@ CREATE TABLE public.payment_orders (
   order_type text,
   plan_id uuid,
   payment_method text,
-  duration_months integer CHECK (duration_months IN (1,3,6,12)),
+  provider_expires_at timestamp with time zone,
+  duration_months integer CHECK (duration_months = ANY (ARRAY[1, 3, 6, 12])),
   monthly_price_idr bigint CHECK (monthly_price_idr > 0),
   monthly_credits integer CHECK (monthly_credits > 0),
-  provider_expires_at timestamp with time zone,
-  payment_qr_string text,
-  payment_va_number text,
   cancelled_at timestamp with time zone,
   cancellation_reason text,
+  payment_qr_string text,
+  payment_va_number text,
+  pricing_config_version integer,
+  payment_verification_source text,
   CONSTRAINT payment_orders_pkey PRIMARY KEY (id),
   CONSTRAINT payment_orders_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
   CONSTRAINT payment_orders_package_id_fkey FOREIGN KEY (package_id) REFERENCES public.token_packages(id)
 );
-CREATE TABLE public.subscription_contracts (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  plan_id uuid NOT NULL REFERENCES public.subscription_plans(id),
-  payment_order_id uuid NOT NULL UNIQUE REFERENCES public.payment_orders(id),
-  provider_reference text NOT NULL,
-  duration_months integer NOT NULL CHECK (duration_months IN (1,3,6,12)),
-  monthly_price_idr bigint NOT NULL CHECK (monthly_price_idr > 0),
-  monthly_credits integer NOT NULL CHECK (monthly_credits > 0),
-  total_amount_idr bigint NOT NULL CHECK (total_amount_idr > 0),
-  starts_at timestamptz NOT NULL,
-  ends_at timestamptz NOT NULL CHECK (ends_at > starts_at),
-  status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','active','completed','cancelled')),
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE TABLE public.subscription_periods (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  contract_id uuid NOT NULL REFERENCES public.subscription_contracts(id),
-  user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  plan_id uuid NOT NULL REFERENCES public.subscription_plans(id),
-  sequence_number integer NOT NULL CHECK (sequence_number BETWEEN 1 AND 12),
-  starts_at timestamptz NOT NULL,
-  ends_at timestamptz NOT NULL CHECK (ends_at > starts_at),
-  monthly_credits integer NOT NULL CHECK (monthly_credits > 0),
-  status text NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled','active','completed','cancelled')),
-  activated_at timestamptz,
-  completed_at timestamptz,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (contract_id, sequence_number)
-);
-ALTER TABLE public.user_subscriptions ADD CONSTRAINT user_subscriptions_period_fkey
-  FOREIGN KEY (subscription_period_id) REFERENCES public.subscription_periods(id);
-CREATE UNIQUE INDEX subscription_projection_period_unique ON public.user_subscriptions(subscription_period_id) WHERE subscription_period_id IS NOT NULL;
-CREATE UNIQUE INDEX subscription_one_active_period ON public.subscription_periods(user_id) WHERE status='active';
-CREATE INDEX subscription_due_periods ON public.subscription_periods(status,starts_at,ends_at);
-CREATE INDEX subscription_user_contracts ON public.subscription_contracts(user_id,ends_at);
-CREATE INDEX payment_due_expiry ON public.payment_orders(provider_expires_at) WHERE status='pending' AND provider='pakasir';
 CREATE TABLE public.user_notifications (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
@@ -418,7 +380,7 @@ CREATE TABLE public.social_account_credentials (
 CREATE TABLE public.credit_lots (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
-  credit_type text NOT NULL CHECK (credit_type = ANY (ARRAY['free'::text, 'subscription'::text, 'topup'::text])),
+  credit_type text NOT NULL CHECK (credit_type = ANY (ARRAY['free'::text, 'subscription'::text, 'topup'::text, 'referral'::text])),
   original_credits integer NOT NULL CHECK (original_credits > 0),
   remaining_credits integer NOT NULL,
   reserved_credits integer NOT NULL DEFAULT 0,
@@ -496,4 +458,171 @@ CREATE TABLE public.admin_error_logs (
   message text NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT admin_error_logs_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.subscription_contracts (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  plan_id uuid NOT NULL,
+  payment_order_id uuid NOT NULL UNIQUE,
+  provider_reference text NOT NULL,
+  duration_months integer NOT NULL CHECK (duration_months = ANY (ARRAY[1, 3, 6, 12])),
+  monthly_price_idr bigint NOT NULL CHECK (monthly_price_idr > 0),
+  monthly_credits integer NOT NULL CHECK (monthly_credits > 0),
+  total_amount_idr bigint NOT NULL CHECK (total_amount_idr > 0),
+  starts_at timestamp with time zone NOT NULL,
+  ends_at timestamp with time zone NOT NULL,
+  status text NOT NULL DEFAULT 'queued'::text CHECK (status = ANY (ARRAY['queued'::text, 'active'::text, 'completed'::text, 'cancelled'::text])),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  pricing_config_version integer,
+  CONSTRAINT subscription_contracts_pkey PRIMARY KEY (id),
+  CONSTRAINT subscription_contracts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
+  CONSTRAINT subscription_contracts_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.subscription_plans(id),
+  CONSTRAINT subscription_contracts_payment_order_id_fkey FOREIGN KEY (payment_order_id) REFERENCES public.payment_orders(id)
+);
+CREATE TABLE public.subscription_periods (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  contract_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  plan_id uuid NOT NULL,
+  sequence_number integer NOT NULL CHECK (sequence_number >= 1 AND sequence_number <= 12),
+  starts_at timestamp with time zone NOT NULL,
+  ends_at timestamp with time zone NOT NULL,
+  monthly_credits integer NOT NULL CHECK (monthly_credits > 0),
+  status text NOT NULL DEFAULT 'scheduled'::text CHECK (status = ANY (ARRAY['scheduled'::text, 'active'::text, 'completed'::text, 'cancelled'::text])),
+  activated_at timestamp with time zone,
+  completed_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT subscription_periods_pkey PRIMARY KEY (id),
+  CONSTRAINT subscription_periods_contract_id_fkey FOREIGN KEY (contract_id) REFERENCES public.subscription_contracts(id),
+  CONSTRAINT subscription_periods_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
+  CONSTRAINT subscription_periods_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.subscription_plans(id)
+);
+CREATE TABLE public.feedback_submissions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  user_email text NOT NULL,
+  user_name text,
+  message text NOT NULL CHECK (char_length(btrim(message)) >= 10 AND char_length(btrim(message)) <= 5000),
+  page_path text CHECK (page_path IS NULL OR page_path ~~ '/%'::text AND char_length(page_path) <= 200),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT feedback_submissions_pkey PRIMARY KEY (id),
+  CONSTRAINT feedback_submissions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.referral_program_config (
+  singleton boolean NOT NULL DEFAULT true CHECK (singleton),
+  enabled boolean NOT NULL DEFAULT true,
+  visible boolean NOT NULL DEFAULT true,
+  referrer_bonus_credits integer NOT NULL DEFAULT 20 CHECK (referrer_bonus_credits >= 0 AND referrer_bonus_credits <= 100000),
+  referred_bonus_credits integer NOT NULL DEFAULT 10 CHECK (referred_bonus_credits >= 0 AND referred_bonus_credits <= 100000),
+  attribution_window_days integer NOT NULL DEFAULT 30 CHECK (attribution_window_days >= 1 AND attribution_window_days <= 365),
+  validation_days integer NOT NULL DEFAULT 30 CHECK (validation_days >= 1 AND validation_days <= 365),
+  reward_expiration_days integer NOT NULL DEFAULT 30 CHECK (reward_expiration_days >= 1 AND reward_expiration_days <= 365),
+  eligible_plan_codes ARRAY NOT NULL DEFAULT ARRAY['starter'::text, 'creator'::text, 'pro'::text],
+  updated_by uuid,
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT referral_program_config_pkey PRIMARY KEY (singleton),
+  CONSTRAINT referral_program_config_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.referral_codes (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL UNIQUE,
+  code text NOT NULL UNIQUE CHECK (code ~ '^[A-Z0-9]{8,16}$'::text),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT referral_codes_pkey PRIMARY KEY (id),
+  CONSTRAINT referral_codes_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.referral_clicks (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  referral_code_id uuid NOT NULL,
+  clicked_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT referral_clicks_pkey PRIMARY KEY (id),
+  CONSTRAINT referral_clicks_referral_code_id_fkey FOREIGN KEY (referral_code_id) REFERENCES public.referral_codes(id)
+);
+CREATE TABLE public.referral_attributions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  referrer_user_id uuid NOT NULL,
+  referred_user_id uuid NOT NULL UNIQUE,
+  referral_code_id uuid NOT NULL,
+  status text NOT NULL DEFAULT 'registered'::text CHECK (status = ANY (ARRAY['registered'::text, 'awaiting_payment'::text, 'pending_validation'::text, 'rewarded'::text, 'rejected'::text, 'canceled'::text])),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT referral_attributions_pkey PRIMARY KEY (id),
+  CONSTRAINT referral_attributions_referrer_user_id_fkey FOREIGN KEY (referrer_user_id) REFERENCES public.profiles(id),
+  CONSTRAINT referral_attributions_referred_user_id_fkey FOREIGN KEY (referred_user_id) REFERENCES public.profiles(id),
+  CONSTRAINT referral_attributions_referral_code_id_fkey FOREIGN KEY (referral_code_id) REFERENCES public.referral_codes(id)
+);
+CREATE TABLE public.referral_rewards (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  attribution_id uuid NOT NULL UNIQUE,
+  referred_user_id uuid NOT NULL UNIQUE,
+  payment_order_id uuid NOT NULL UNIQUE,
+  plan_code text NOT NULL,
+  payment_amount_idr bigint NOT NULL CHECK (payment_amount_idr >= 0),
+  referrer_bonus_credits integer NOT NULL CHECK (referrer_bonus_credits >= 0),
+  referred_bonus_credits integer NOT NULL CHECK (referred_bonus_credits >= 0),
+  reward_expiration_days integer NOT NULL CHECK (reward_expiration_days >= 1 AND reward_expiration_days <= 365),
+  validation_due_at timestamp with time zone NOT NULL,
+  status text NOT NULL DEFAULT 'pending_validation'::text CHECK (status = ANY (ARRAY['pending_validation'::text, 'rewarded'::text, 'rejected'::text, 'canceled'::text])),
+  review_required boolean NOT NULL DEFAULT false,
+  review_reason text,
+  granted_at timestamp with time zone,
+  decided_by uuid,
+  decision_reason text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT referral_rewards_pkey PRIMARY KEY (id),
+  CONSTRAINT referral_rewards_attribution_id_fkey FOREIGN KEY (attribution_id) REFERENCES public.referral_attributions(id),
+  CONSTRAINT referral_rewards_referred_user_id_fkey FOREIGN KEY (referred_user_id) REFERENCES public.profiles(id),
+  CONSTRAINT referral_rewards_payment_order_id_fkey FOREIGN KEY (payment_order_id) REFERENCES public.payment_orders(id),
+  CONSTRAINT referral_rewards_decided_by_fkey FOREIGN KEY (decided_by) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.referral_credit_grants (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  reward_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  recipient_role text NOT NULL CHECK (recipient_role = ANY (ARRAY['referrer'::text, 'referred'::text])),
+  credits integer NOT NULL CHECK (credits > 0),
+  credit_lot_id uuid NOT NULL UNIQUE,
+  expires_at timestamp with time zone NOT NULL,
+  granted_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT referral_credit_grants_pkey PRIMARY KEY (id),
+  CONSTRAINT referral_credit_grants_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
+  CONSTRAINT referral_credit_grants_credit_lot_id_fkey FOREIGN KEY (credit_lot_id) REFERENCES public.credit_lots(id),
+  CONSTRAINT referral_credit_grants_reward_id_fkey FOREIGN KEY (reward_id) REFERENCES public.referral_rewards(id)
+);
+CREATE TABLE public.referral_events (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  attribution_id uuid,
+  reward_id uuid,
+  actor_user_id uuid,
+  event_type text NOT NULL,
+  detail jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT referral_events_pkey PRIMARY KEY (id),
+  CONSTRAINT referral_events_attribution_id_fkey FOREIGN KEY (attribution_id) REFERENCES public.referral_attributions(id),
+  CONSTRAINT referral_events_reward_id_fkey FOREIGN KEY (reward_id) REFERENCES public.referral_rewards(id),
+  CONSTRAINT referral_events_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.subscription_pricing_config (
+  singleton boolean NOT NULL DEFAULT true CHECK (singleton),
+  version integer NOT NULL DEFAULT 1 CHECK (version > 0),
+  draft jsonb NOT NULL,
+  published jsonb NOT NULL,
+  updated_by uuid,
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  published_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT subscription_pricing_config_pkey PRIMARY KEY (singleton),
+  CONSTRAINT subscription_pricing_config_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.subscription_expiry_reminders (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  contract_id uuid NOT NULL,
+  days_before integer NOT NULL CHECK (days_before = ANY (ARRAY[7, 3, 1])),
+  sent_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT subscription_expiry_reminders_pkey PRIMARY KEY (id),
+  CONSTRAINT subscription_expiry_reminders_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
+  CONSTRAINT subscription_expiry_reminders_contract_id_fkey FOREIGN KEY (contract_id) REFERENCES public.subscription_contracts(id)
 );

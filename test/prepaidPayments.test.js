@@ -5,7 +5,7 @@ const { DEFAULTS } = require('../src/services/subscriptionPricingService');
 
 async function main() {
   const id = '00000000-0000-4000-8000-000000000001';
-  let inserted, charged, cancelled = 0, outcome = 'pending', cancelFailure = false;
+  let inserted, charged, cancelled = 0, outcome = 'pending';
   const expiry = '2026-01-01T00:30:00.000Z';
   const writes = [];
   const db = { from(table) { const filters={}; return {
@@ -26,7 +26,7 @@ async function main() {
   const gateway = { configured() {},
     create: async (orderId, amount) => { charged = amount; return { txn_id: 'txn', order_id: orderId, project: 'shop', amount, payment_method: 'qris', qr_string: 'qr', expired_at: expiry }; },
     status: async () => ({ txn_id: 'txn', order_id: inserted.id, amount: charged, status: outcome, is_sandbox: false }),
-    cancel: async () => { cancelled++; if (cancelFailure) throw new Error('offline'); return { message: 'ok' }; },
+    cancel: async () => { cancelled++; assert.fail('backend must not auto-cancel a provider-pending payment'); },
   };
   let clockNow=Date.parse(expiry);
   const service = createPaymentsService({ db, gateway, env: { PAKASIR_SLUG: 'shop' }, now: () => clockNow });
@@ -51,12 +51,12 @@ async function main() {
   assert.equal((await service.checkOrder('owner', inserted.id)).status, 'paid');
   assert.equal(cancelled, 0);
   outcome = 'pending';
-  cancelFailure = true;
-  await assert.rejects(service.checkOrder('owner', inserted.id), /offline/);
+  assert.equal((await service.checkOrder('owner', inserted.id)).status, 'pending');
   assert.equal(inserted.status, 'pending');
-  cancelFailure = false;
+  assert.equal(cancelled, 0);
+  outcome = 'canceled';
   assert.equal((await service.checkOrder('owner', inserted.id)).status, 'cancelled');
-  assert.equal(cancelled, 2);
+  assert.equal(cancelled, 0);
 
   let clock = 0;
   const times = [];
@@ -67,6 +67,6 @@ async function main() {
     } });
   await Promise.all([client.cancel('a'), client.cancel('b'), client.cancel('c')]);
   assert.ok(times[1] - times[0] >= 500 && times[2] - times[1] >= 500);
-  console.log('ok - prepaid duration snapshots, provider expiry, completion before cancellation, retry and cancel throttling');
+  console.log('ok - prepaid duration snapshots, provider expiry, provider-confirmed payment states and gateway cancel throttling');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -7,7 +7,7 @@ const DEFAULTS = Object.freeze({
   defaultDurationMonths: 3,
   enabledDurations: DURATIONS,
   expiryReminderDays: [7, 3, 1],
-  renewalPolicy: 'same_plan_only',
+  renewalPolicy: 'queue_after_paid_coverage',
   plans: {
     starter: { prices: { 1: 29000, 3: 74000, 12: 249000 }, monthlyAiCredits: 200 },
     creator: { prices: { 1: 59000, 3: 149000, 12: 499000 }, monthlyAiCredits: 600 },
@@ -30,7 +30,9 @@ function validateConfig(input) {
   if (!Array.isArray(config.expiryReminderDays) || config.expiryReminderDays.some(value => ![7, 3, 1].includes(value)) || new Set(config.expiryReminderDays).size !== config.expiryReminderDays.length) {
     throw httpError('Reminder days may only contain 7, 3, or 1.', 400, 'INVALID_PRICING_CONFIG');
   }
-  if (config.renewalPolicy !== 'same_plan_only') throw httpError('Unsupported renewal policy.', 400, 'INVALID_PRICING_CONFIG');
+  // Older admin clients can submit their existing drafts; normalize their
+  // policy to the queued purchase behavior without changing prices.
+  if (![DEFAULTS.renewalPolicy, 'same_plan_only'].includes(config.renewalPolicy)) throw httpError('Unsupported renewal policy.', 400, 'INVALID_PRICING_CONFIG');
   if (!config.plans || typeof config.plans !== 'object') throw httpError('Plan pricing is required.', 400, 'INVALID_PRICING_CONFIG');
   const plans = {};
   for (const code of PLAN_CODES) {
@@ -50,7 +52,7 @@ function validateConfig(input) {
     defaultDurationMonths: config.defaultDurationMonths,
     enabledDurations: [...enabledDurations].sort((a, b) => a - b),
     expiryReminderDays: [...config.expiryReminderDays].sort((a, b) => b - a),
-    renewalPolicy: 'same_plan_only',
+    renewalPolicy: DEFAULTS.renewalPolicy,
     plans,
   };
 }
@@ -69,7 +71,8 @@ function createSubscriptionPricingService({ db, now = () => new Date().toISOStri
   }
   async function getPublished() {
     const row = await readConfig();
-    return { ...row.published, version: row.version, publishedAt: row.published_at };
+    return { ...row.published, renewalPolicy: row.published.renewalPolicy === 'same_plan_only' ? DEFAULTS.renewalPolicy : row.published.renewalPolicy,
+      version: row.version, publishedAt: row.published_at };
   }
   async function getAdminConfig() {
     const row = await readConfig();

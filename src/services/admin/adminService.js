@@ -395,7 +395,7 @@ async function getTransactions({ query = "", status = "", from, to, page = 1, li
   const db = getAdminDb();
   const paging = pageArgs({ page, limit });
   let request = db.from("payment_orders")
-    .select("id,user_id,package_id,amount_idr,token_amount,credits,status,provider,provider_reference,payment_reference,paid_at,created_at", { count: "exact" })
+    .select("id,user_id,package_id,plan_id,order_type,amount_idr,token_amount,credits,status,provider,provider_reference,payment_reference,paid_at,created_at", { count: "exact" })
     .order("created_at", { ascending: false })
     .range(paging.from, paging.to);
   if (status) request = request.eq("status", status);
@@ -404,22 +404,26 @@ async function getTransactions({ query = "", status = "", from, to, page = 1, li
   if (search) request = request.or(`id.eq.${search},provider_reference.ilike.%${search}%`);
   const { data, count, error } = await request;
   throwDataError(error);
-  const userIds = [...new Set((data || []).map((row) => row.user_id))];
-  const packageIds = [...new Set((data || []).map((row) => row.package_id))];
-  const [{ data: profiles, error: profileError }, { data: packages, error: packageError }] = await Promise.all([
+  const userIds = [...new Set((data || []).map((row) => row.user_id).filter(Boolean))];
+  const packageIds = [...new Set((data || []).map((row) => row.package_id).filter(Boolean))];
+  const planIds = [...new Set((data || []).map((row) => row.plan_id).filter(Boolean))];
+  const [{ data: profiles, error: profileError }, { data: packages, error: packageError }, { data: plans, error: planError }] = await Promise.all([
     userIds.length ? db.from("profiles").select("id,account_name,full_name").in("id", userIds) : Promise.resolve({ data: [], error: null }),
     packageIds.length ? db.from("token_packages").select("id,name,code").in("id", packageIds) : Promise.resolve({ data: [], error: null }),
+    planIds.length ? db.from("subscription_plans").select("id,name,code").in("id", planIds) : Promise.resolve({ data: [], error: null }),
   ]);
-  throwDataError(profileError); throwDataError(packageError);
+  throwDataError(profileError); throwDataError(packageError); throwDataError(planError);
   const profileMap = new Map((profiles || []).map((row) => [row.id, row]));
   const packageMap = new Map((packages || []).map((row) => [row.id, row]));
+  const planMap = new Map((plans || []).map((row) => [row.id, row]));
   return {
     items: (data || []).map((row) => ({
       id: row.id, userId: row.user_id,
       user: profileMap.get(row.user_id)?.full_name || profileMap.get(row.user_id)?.account_name || row.user_id,
       accountName: profileMap.get(row.user_id)?.account_name || "",
-      product: packageMap.get(row.package_id)?.name || "Unknown product",
-      type: "top_up", amountIdr: Number(row.amount_idr || 0), credits: Number(row.credits ?? row.token_amount ?? 0),
+      product: (row.order_type === "subscription" || row.plan_id ? planMap.get(row.plan_id)?.name : packageMap.get(row.package_id)?.name) || "Unknown product",
+      type: row.order_type === "subscription" || row.plan_id ? "subscription" : "top_up",
+      amountIdr: Number(row.amount_idr || 0), credits: Number(row.credits ?? row.token_amount ?? 0),
       status: row.status, provider: row.provider, providerReference: row.provider_reference || row.payment_reference || null,
       paidAt: row.paid_at, createdAt: row.created_at,
     })),
