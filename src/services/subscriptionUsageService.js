@@ -29,7 +29,9 @@ function mapSubscriptionPlanRow(row) {
     code: row.code,
     name: row.name,
     maxPersonas: row.max_personas,
-    maxContentPillars: row.content_pillars,
+    maxContentPillars: row.content_pillars ?? row.max_content_pillars,
+    maxThreadsAccounts: row.max_threads_accounts ?? undefined,
+    canSchedule: typeof row.can_schedule === 'boolean' ? row.can_schedule : undefined,
     monthlyAiCredits: row.monthly_ai_credits,
     dailyTopicGenerations: row.daily_topic_generations,
     dailyContentGenerations: row.daily_content_generations,
@@ -86,13 +88,23 @@ async function getActiveUserSubscription({ supabase, userId }) {
     return null;
   }
 
-  const { data: planRow, error: planError } = await supabase
+  let { data: planRow, error: planError } = await supabase
     .from("subscription_plans")
     .select(
-      "id, code, name, max_personas, content_pillars, monthly_ai_credits, daily_topic_generations, daily_content_generations, is_active, created_at"
+      "id, code, name, max_personas, content_pillars, max_threads_accounts, can_schedule, monthly_ai_credits, daily_topic_generations, daily_content_generations, is_active, created_at"
     )
     .eq("id", subscriptionRow.plan_id)
     .maybeSingle();
+
+  if (planError && /max_threads_accounts|can_schedule|column .* does not exist/i.test(planError.message || '')) {
+    const legacyPlanResult = await supabase
+      .from("subscription_plans")
+      .select("id, code, name, max_personas, content_pillars, monthly_ai_credits, daily_topic_generations, daily_content_generations, is_active, created_at")
+      .eq("id", subscriptionRow.plan_id)
+      .maybeSingle();
+    planRow = legacyPlanResult.data;
+    planError = legacyPlanResult.error;
+  }
 
   if (planError) {
     throw createHttpError(planError.message, 400, planError);

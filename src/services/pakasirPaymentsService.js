@@ -64,25 +64,52 @@ function createPaymentsService({ db, gateway = pakasir, env = process.env, now =
     validId(packageId || planId);
     const subscription = Boolean(planId);
     const duration = Object.hasOwn(body, 'durationMonths') ? body.durationMonths : 1;
-    if ((subscription && ![1, 3, 6, 12].includes(duration)) || (!subscription && Object.hasOwn(body, 'durationMonths'))) {
-      throw fail('Durasi subscription harus 1, 3, 6, atau 12 bulan.', 400, 'INVALID_SUBSCRIPTION_DURATION');
+    if ((subscription && ![1, 3, 12].includes(duration)) || (!subscription && Object.hasOwn(body, 'durationMonths'))) {
+      throw fail('Durasi subscription harus 1, 3, atau 12 bulan.', 400, 'INVALID_SUBSCRIPTION_DURATION');
     }
     if (!subscription) await assertPaidPlan(userId);
+    if (subscription) {
+      const { data: pendingOrder, error: pendingError } = await database().from('payment_orders')
+        .select('id').eq('user_id', userId).eq('order_type', 'subscription').eq('status', 'pending').limit(1).maybeSingle();
+      if (pendingError) throw fail('Pending subscription order could not be checked.', 503);
+      if (pendingOrder) throw fail('Selesaikan atau tunggu kedaluwarsa order subscription yang masih pending sebelum membuat order baru.', 409, 'PENDING_SUBSCRIPTION_ORDER_EXISTS');
+    }
     const { data: product, error } = await database().from(subscription ? 'subscription_plans' : 'token_packages')
       .select(subscription ? 'id,price,monthly_ai_credits,is_active,code' : 'id,price_idr,token_amount,is_active')
       .eq('id', planId || packageId).maybeSingle();
     if (error) throw fail(error.message);
     if (!product?.is_active || (subscription && product.code === 'free')) throw fail('Paket tidak tersedia.', 404);
-    const monthlyPrice = Number(product.price);
-    const amount = subscription ? monthlyPrice * duration : Number(product.price_idr);
-    const credits = Number(subscription ? product.monthly_ai_credits : product.token_amount);
+    let pricing = null;
+    let currentPlan = null;
+    if (subscription) {
+      const pricingService = require('./subscriptionPricingService').createSubscriptionPricingService({ db: database() });
+      pricing = await pricingService.getPublished();
+      const configuredPlan = pricing.plans?.[product.code];
+      if (!configuredPlan || !pricing.enabledDurations?.includes(duration)) throw fail('Durasi ini sedang tidak tersedia.', 409, 'SUBSCRIPTION_DURATION_UNAVAILABLE');
+      const { data: current, error: currentError } = await database().from('user_subscriptions')
+        .select('plan_id,ends_at,started_at,status')
+        .eq('user_id', userId).eq('status', 'active').lte('started_at', new Date(now()).toISOString())
+        .order('started_at', { ascending: false }).limit(1).maybeSingle();
+      if (currentError) throw fail('Status langganan tidak dapat diperiksa.', 503);
+      if (current?.plan_id) {
+        const { data: currentPlanRow, error: planError } = await database().from('subscription_plans').select('code').eq('id', current.plan_id).maybeSingle();
+        if (planError || !currentPlanRow) throw fail('Paket aktif tidak dapat diverifikasi.', 503);
+        currentPlan = currentPlanRow.code;
+      }
+      if (current && currentPlan !== product.code && (!current.ends_at || Date.parse(current.ends_at) > now())) {
+        throw fail('Paket lain baru bisa dipilih setelah masa aktif paket ini berakhir.', 409, 'PLAN_CHANGE_NOT_AVAILABLE');
+      }
+    }
+    const monthlyPrice = Number(subscription ? pricing.plans[product.code].prices['1'] : product.price);
+    const amount = subscription ? Number(pricing.plans[product.code].prices[String(duration)]) : Number(product.price_idr);
+    const credits = Number(subscription ? pricing.plans[product.code].monthlyAiCredits : product.token_amount);
     if (!Number.isSafeInteger(amount) || amount < method.minAmount || amount > method.maxAmount || !Number.isSafeInteger(credits) || credits <= 0) throw fail('Harga atau kredit paket tidak valid untuk metode pembayaran ini.', 400);
     const { data: order, error: insertError } = await database().from('payment_orders').insert({
       id: crypto.randomUUID(), user_id: userId, package_id: packageId || null, plan_id: planId || null,
       order_type: subscription ? 'subscription' : 'topup', amount_idr: amount,
       token_amount: credits, credits, status: 'pending', provider: 'pakasir',
       payment_method: method.code,
-      ...(subscription ? { duration_months: duration, monthly_price_idr: monthlyPrice, monthly_credits: credits } : {}),
+      ...(subscription ? { duration_months: duration, monthly_price_idr: monthlyPrice, monthly_credits: credits, pricing_config_version: pricing.version } : {}),
     }).select('*').single();
     if (insertError) throw fail(insertError.message);
     try { return await checkout(order); }

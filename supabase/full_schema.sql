@@ -154,6 +154,8 @@ CREATE TABLE public.subscription_plans (
   token_allowance bigint NOT NULL DEFAULT 0,
   currency text NOT NULL DEFAULT 'IDR'::text,
   content_pillars integer NOT NULL DEFAULT 1 CHECK (content_pillars >= 0),
+  max_threads_accounts integer NOT NULL DEFAULT 1 CHECK (max_threads_accounts >= 0),
+  can_schedule boolean NOT NULL DEFAULT true,
   CONSTRAINT subscription_plans_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.user_subscriptions (

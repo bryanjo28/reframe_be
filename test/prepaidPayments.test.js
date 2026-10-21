@@ -1,18 +1,22 @@
 const assert = require('node:assert/strict');
 const { createPaymentsService } = require('../src/services/pakasirPaymentsService');
 const { createPakasirClient } = require('../src/services/pakasirService');
+const { DEFAULTS } = require('../src/services/subscriptionPricingService');
 
 async function main() {
   const id = '00000000-0000-4000-8000-000000000001';
   let inserted, charged, cancelled = 0, outcome = 'pending', cancelFailure = false;
   const expiry = '2026-01-01T00:30:00.000Z';
   const writes = [];
-  const db = { from() { return {
-    select() { return this; }, eq() { return this; },
+  const db = { from(table) { const filters={}; return {
+    select() { return this; }, eq(key,value) { filters[key]=value; return this; }, lte() { return this; }, limit() { return this; }, order() { return this; },
     insert(row) { inserted = row; return this; },
     update(row) { writes.push(row); return this; },
     single: async () => ({ data: inserted }),
-    maybeSingle: async () => ({ data: inserted || { id, price: 29000, monthly_ai_credits: 200, code: 'starter', is_active: true } }),
+    maybeSingle: async () => ({ data: table === 'subscription_pricing_config' ? { singleton: true, version: 1, published: DEFAULTS }
+      : table === 'payment_orders' && filters.status === 'pending' ? null
+        : table === 'user_subscriptions' ? null
+          : inserted || { id, price: 29000, monthly_ai_credits: 200, code: 'starter', is_active: true } }),
     then(resolve) { resolve({ data: inserted, error: null }); },
   }; }, async rpc(name) {
     if (name === 'settle_pakasir_payment') return { data: { creditsAdded: 200, duplicate: false } };
@@ -26,10 +30,10 @@ async function main() {
   };
   let clockNow=Date.parse(expiry);
   const service = createPaymentsService({ db, gateway, env: { PAKASIR_SLUG: 'shop' }, now: () => clockNow });
-  for (const months of [1, 3, 6, 12]) {
+  for (const [months, total] of [[1, 29000], [3, 74000], [12, 249000]]) {
     inserted = null;
     const order = await service.createOrder('owner', { planId: id, durationMonths: months, amount: 1, credits: 999 });
-    assert.equal(charged, 29000 * months);
+    assert.equal(charged, total);
     assert.equal(inserted.monthly_credits, 200);
     assert.equal(inserted.duration_months, months);
     assert.equal(order.providerExpiresAt, expiry);

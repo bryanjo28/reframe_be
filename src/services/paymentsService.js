@@ -9,7 +9,7 @@ async function getPaymentPageData(userId, { db = admin() } = {}){
   const [{data:packages,error:pe},{data:wallet,error:we},{data:orders,error:oe},{data:notifications,error:ne},{data:ledger,error:le},{data:lots,error:lotsError},{data:creditTransactions,error:transactionsError},{data:usageHistory,error:usageError}]=await Promise.all([
     db.from("token_packages").select("id,code,name,token_amount,price_idr").eq("is_active",true).order("sort_order"),
     db.from("token_wallets").select("balance,updated_at").eq("user_id",userId).maybeSingle(),
-    db.from("payment_orders").select("id,amount_idr,token_amount,status,provider,order_type,plan_id,payment_method,created_at,paid_at,duration_months,monthly_credits,provider_expires_at").eq("user_id",userId).order("created_at",{ascending:false}).limit(10),
+    db.from("payment_orders").select("id,amount_idr,token_amount,status,provider,order_type,plan_id,payment_method,created_at,paid_at,duration_months,monthly_credits,pricing_config_version,payment_verification_source,provider_expires_at").eq("user_id",userId).order("created_at",{ascending:false}).limit(10),
     db.from("user_notifications").select("id,type,title,message,read_at,created_at").eq("user_id",userId).order("created_at",{ascending:false}).limit(20),
     db.from("token_ledger").select("id,amount,balance_after,kind,description,created_at").eq("user_id",userId).order("created_at",{ascending:false}).limit(20),
     db.from("credit_lots").select("credit_type,original_credits,remaining_credits,expires_at").eq("user_id",userId),

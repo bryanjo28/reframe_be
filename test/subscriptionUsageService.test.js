@@ -146,13 +146,15 @@ function createFakeSupabase({
       name: "Free",
       max_personas: 1,
       content_pillars: 4,
+      max_threads_accounts: 0,
+      can_schedule: false,
       monthly_ai_credits: 100,
       is_active: true,
     });
 
     assert.equal(mapped.maxContentPillars, 4);
-    assert.equal(Object.hasOwn(mapped, "maxThreadsAccounts"), false);
-    assert.equal(Object.hasOwn(mapped, "canSchedule"), false);
+    assert.equal(mapped.maxThreadsAccounts, 0);
+    assert.equal(mapped.canSchedule, false);
   });
 
   await run("active subscription lookup queries the current pillar limit column", async () => {

@@ -85,7 +85,7 @@ async function main() {
     await assert.rejects(db.query('select ensure_subscription_current($1)',[user]), /Unauthorized/);
     await db.exec("set request.jwt.claim.role='service_role'");
     await db.query('select ensure_subscription_current($1)',[user]);
-    for (const months of [1,6,12]) {
+    for (const months of [1,3,6,12]) {
       const u = `00000000-0000-4000-8000-${String(months+100).padStart(12,'0')}`;
       const o = `00000000-0000-4000-8000-${String(months+200).padStart(12,'0')}`;
       await db.query('insert into profiles values ($1)',[u]);

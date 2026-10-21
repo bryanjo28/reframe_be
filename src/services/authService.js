@@ -9,6 +9,9 @@
 } = require("../config/supabase");
 const { isDisposable } = require("detect-disposable-email");
 
+const LEGAL_TERMS_VERSION = "2026-10-20";
+const PRIVACY_NOTICE_VERSION = "2026-10-20";
+
 function createHttpError(message, status = 500, details, code = "AUTH_SERVICE_ERROR") {
   const error = new Error(message);
   error.status = status;
@@ -134,6 +137,20 @@ function assertStrongRegistrationPassword(password) {
       400,
       undefined,
       "WEAK_PASSWORD"
+    );
+  }
+}
+
+function assertLegalConsent({ acceptedTermsVersion, acceptedPrivacyNoticeVersion } = {}) {
+  if (
+    acceptedTermsVersion !== LEGAL_TERMS_VERSION ||
+    acceptedPrivacyNoticeVersion !== PRIVACY_NOTICE_VERSION
+  ) {
+    throw createHttpError(
+      "Setujui Syarat & Ketentuan dan Pemberitahuan Privasi yang berlaku untuk membuat akun.",
+      400,
+      undefined,
+      "LEGAL_CONSENT_REQUIRED"
     );
   }
 }
@@ -625,7 +642,7 @@ async function getProfileByUserId({ userId, accessToken }) {
 }
 
 async function register(
-  { email, password, accountName, fullName },
+  { email, password, accountName, fullName, acceptedTermsVersion, acceptedPrivacyNoticeVersion, referralToken },
   dependencies = {}
 ) {
   const authClient = dependencies.authClient || createSupabaseAuthClient();
@@ -684,6 +701,9 @@ async function register(
         display_name:
           normalizedInput.fullName ||
           normalizedInput.accountName,
+        accepted_terms_version: acceptedTermsVersion,
+        accepted_privacy_notice_version: acceptedPrivacyNoticeVersion,
+        legal_consent_accepted_at: new Date().toISOString(),
       },
     },
   }));
@@ -712,6 +732,20 @@ async function register(
     userId: signUpData.user.id,
     freePlan,
   }));
+
+  if (typeof referralToken === "string" && referralToken) {
+    try {
+      const { createReferralService } = require("./referralService");
+      await timedStage("referral-attribution", () => createReferralService({ db: adminClient }).createAttribution({
+        userId: signUpData.user.id,
+        token: referralToken,
+      }));
+    } catch (error) {
+      // Referral is optional; a temporary referral-storage failure must not
+      // turn a completed Supabase signup into a failed registration response.
+      console.error(`[auth-register] requestId=${dependencies.requestId || "unknown"} referral attribution was not saved code=${error.code || "REFERRAL_STORAGE_ERROR"}`);
+    }
+  }
 
   return buildRegistrationResponse({
     user: signUpData.user,
@@ -1052,8 +1086,11 @@ async function logout({ supabase }) {
 }
 
 module.exports = {
+  LEGAL_TERMS_VERSION,
+  PRIVACY_NOTICE_VERSION,
   assertAccountNameAvailable,
   assertAllowedRegistrationEmail,
+  assertLegalConsent,
   assertEmailConfirmed,
   assertRequiredAuthFields,
   assertStrongRegistrationPassword,
