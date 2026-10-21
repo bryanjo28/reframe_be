@@ -19,6 +19,9 @@ async function main() {
   assert.throws(() => validateConfig({ ...config, defaultDurationMonths: 6 }), { code: 'INVALID_PRICING_CONFIG' });
   assert.throws(() => validateConfig({ ...config, enabledDurations: [1, 6] }), { code: 'INVALID_PRICING_CONFIG' });
   assert.throws(() => validateConfig({ ...config, plans: { ...config.plans, creator: { ...config.plans.creator, prices: { ...config.plans.creator.prices, 12: -1 } } } }), { code: 'INVALID_PRICING_CONFIG' });
+  assert.throws(() => validateConfig({ ...config, plans: { ...config.plans, starter: { ...config.plans.starter, prices: { 1: 29000, 3: 29000, 12: 29000 } } } }), { code: 'INVALID_PRICING_CONFIG' }, 'equal duration prices must not be accepted');
+  assert.throws(() => validateConfig({ ...config, plans: { ...config.plans, starter: { ...config.plans.starter, prices: { 1: 29000, 3: 87000, 12: 249000 } } } }), { code: 'INVALID_PRICING_CONFIG' }, 'three-month price must include a discount');
+  assert.throws(() => validateConfig({ ...config, plans: { ...config.plans, starter: { ...config.plans.starter, prices: { 1: 29000, 3: 74000, 12: 348000 } } } }), { code: 'INVALID_PRICING_CONFIG' }, 'twelve-month price must include a discount');
 
   const configRow = { singleton: true, version: 8, draft: config, published: config, published_at: '2026-10-20T00:00:00Z', updated_at: '2026-10-20T00:00:00Z' };
   const pricing = createSubscriptionPricingService({ db: {
@@ -31,6 +34,13 @@ async function main() {
   assert.equal((await pricing.getPublished()).renewalPolicy, 'queue_after_paid_coverage');
   assert.deepEqual((await pricing.getPublished()).plans, config.plans);
   configRow.published = config;
+
+  const invalidPublished = createSubscriptionPricingService({ db: {
+    from() { return { select() { return this; }, eq() { return this; }, async maybeSingle() {
+      return { data: { ...configRow, published: { ...config, plans: { ...config.plans, starter: { ...config.plans.starter, prices: { 1: 29000, 3: 29000, 12: 29000 } } } } }, error: null };
+    } }; },
+  } });
+  await assert.rejects(invalidPublished.getPublished(), { status: 503, code: 'INVALID_PUBLISHED_PRICING_CONFIG' });
 
   const productId = '00000000-0000-4000-8000-000000000012';
   let product = { id: productId, price: 59000, monthly_ai_credits: 600, code: 'creator', is_active: true };

@@ -46,6 +46,10 @@ function validateConfig(input) {
       if (!Number.isSafeInteger(amount) || amount < 500 || amount > 10000000) throw httpError(`Invalid ${code} ${duration}-month price.`, 400, 'INVALID_PRICING_CONFIG');
       prices[String(duration)] = amount;
     }
+    if (prices['3'] <= prices['1'] || prices['3'] >= prices['1'] * 3 ||
+        prices['12'] <= prices['3'] || prices['12'] >= prices['1'] * 12) {
+      throw httpError(`${code} pricing must increase by duration and discount the 3- and 12-month totals.`, 400, 'INVALID_PRICING_CONFIG');
+    }
     plans[code] = { prices, monthlyAiCredits: plan.monthlyAiCredits };
   }
   return {
@@ -71,8 +75,11 @@ function createSubscriptionPricingService({ db, now = () => new Date().toISOStri
   }
   async function getPublished() {
     const row = await readConfig();
-    return { ...row.published, renewalPolicy: row.published.renewalPolicy === 'same_plan_only' ? DEFAULTS.renewalPolicy : row.published.renewalPolicy,
-      version: row.version, publishedAt: row.published_at };
+    try {
+      return { ...validateConfig(row.published), version: row.version, publishedAt: row.published_at };
+    } catch {
+      throw httpError('Published subscription pricing is invalid. Correct and republish the pricing configuration before accepting orders.', 503, 'INVALID_PUBLISHED_PRICING_CONFIG');
+    }
   }
   async function getAdminConfig() {
     const row = await readConfig();
