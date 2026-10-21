@@ -38,7 +38,7 @@ async function handleThreadsCallback(req, res, next) {
   try {
     const { code, state } = req.query;
 
-    const result = await threadsAuthService.handleCallback({ code, state });
+    const result = await threadsAuthService.handleCallback({ code, state, requestId: req.requestId });
 
     const params = new URLSearchParams({
       connected: "true",
