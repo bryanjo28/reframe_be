@@ -57,6 +57,8 @@ run("validateRegisterRequest normalizes request body and allows snake_case input
       password: "  Secret123  ",
       account_name: "  alpha  ",
       full_name: "  Alpha User  ",
+      acceptedTermsVersion: "2026-10-20",
+      acceptedPrivacyNoticeVersion: "2026-10-20",
     },
   };
 
@@ -72,6 +74,9 @@ run("validateRegisterRequest normalizes request body and allows snake_case input
     password: "  Secret123  ",
     accountName: "alpha",
     fullName: "Alpha User",
+    acceptedTermsVersion: "2026-10-20",
+    acceptedPrivacyNoticeVersion: "2026-10-20",
+    referralToken: "",
   });
 });
 
@@ -100,6 +105,8 @@ run("validateRegisterRequest allows permanent Yahoo email", () => {
       email: "user@yahoo.com",
       password: "Secret123",
       accountName: "alpha",
+      acceptedTermsVersion: "2026-10-20",
+      acceptedPrivacyNoticeVersion: "2026-10-20",
     },
   };
   let receivedError = null;
@@ -148,6 +155,8 @@ run("validateRegisterRequest accepts a password meeting every requirement", () =
       email: "user@example.com",
       password: "Secret123",
       accountName: "alpha",
+      acceptedTermsVersion: "2026-10-20",
+      acceptedPrivacyNoticeVersion: "2026-10-20",
     },
   };
   let receivedError = null;

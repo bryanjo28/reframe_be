@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const { createPakasirClient } = require('../src/services/pakasirService');
 const { createPaymentsService } = require('../src/services/paymentsService');
+const { DEFAULTS } = require('../src/services/subscriptionPricingService');
 
 async function main() {
   await testResumableQris();
@@ -89,12 +90,16 @@ async function main() {
   let timeout = false;
   let eligible = false;
   let wrongMethod = false;
+  let currentPricingConfig = DEFAULTS;
   const catalogDb = { from(table) {
+    const filters = {};
     return {
-      select() { return this; }, eq() { return this; },
+      select() { return this; }, eq(key, value) { filters[key] = value; return this; }, or() { return this; }, lte() { return this; }, limit() { return this; }, order() { return this; },
       async maybeSingle() {
+        if (table === 'subscription_pricing_config') return { data: { singleton: true, version: 1, published: currentPricingConfig }, error: null };
         if (table === 'subscription_plans') return { data: product };
         if (table === 'token_packages') return { data: { id: productId, price_idr: 15000, token_amount: 100, is_active: true } };
+        if (table === 'payment_orders' && filters.status === 'pending') return { data: null };
         if (table === 'payment_orders') return { data: inserted };
         if (table === 'user_subscriptions') return { data: eligible ? { id: productId, plan_id: productId, status: 'active', started_at: new Date().toISOString() } : null };
       },
@@ -131,7 +136,9 @@ async function main() {
   await assert.rejects(catalogService.createOrder('owner', { planId: productId, method: 'unknown_va' }), { status: 400 });
   await assert.rejects(catalogService.createOrder('owner', { planId: productId, method: 'payment_link' }), { status: 400 });
   product = { ...product, price: 5000 };
-  await assert.rejects(catalogService.createOrder('owner', { planId: productId, method: 'bni_va' }), { status: 400 });
+  currentPricingConfig = { ...DEFAULTS, enabledDurations: [1, 12] };
+  await assert.rejects(catalogService.createOrder('owner', { planId: productId, method: 'bni_va', durationMonths: 3 }), { code: 'SUBSCRIPTION_DURATION_UNAVAILABLE' });
+  currentPricingConfig = DEFAULTS;
   product = { ...product, price: 29000 };
   wrongMethod = true;
   const invalidProviderMethod = await catalogService.createOrder('owner', { planId: productId, method: 'bni_va' });
@@ -163,14 +170,17 @@ async function testResumableQris() {
   const db = { from(table) {
     const filters = {};
     return {
-      select() { return this; }, eq(key, value) { filters[key] = value; return this; },
+      select() { return this; }, eq(key, value) { filters[key] = value; return this; }, lte() { return this; }, limit() { return this; }, order() { return this; },
       insert(row) { stored = { ...row }; return this; },
       update(row) { Object.assign(stored, row); return this; },
       single: async () => ({ data: { ...stored } }),
       async maybeSingle() {
+        if (table === 'subscription_pricing_config') return { data: { singleton: true, version: 1, published: DEFAULTS }, error: null };
         if (table === 'subscription_plans') return { data: {
           id: productId, price: 29000, monthly_ai_credits: 200, code: 'starter', is_active: true,
         } };
+        if (table === 'payment_orders' && filters.status === 'pending') return { data: null };
+        if (table === 'user_subscriptions') return { data: null };
         const missing = (filters.user_id && filters.user_id !== stored.user_id) ||
           (filters.id && filters.id !== stored.id);
         return { data: missing ? null : { ...stored } };

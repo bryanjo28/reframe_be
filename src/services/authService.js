@@ -8,6 +8,10 @@
   updatePasswordWithAccessToken,
 } = require("../config/supabase");
 const { isDisposable } = require("detect-disposable-email");
+const { redactMessage } = require("./admin/adminErrorLogService");
+
+const LEGAL_TERMS_VERSION = "2026-10-20";
+const PRIVACY_NOTICE_VERSION = "2026-10-20";
 
 function createHttpError(message, status = 500, details, code = "AUTH_SERVICE_ERROR") {
   const error = new Error(message);
@@ -134,6 +138,20 @@ function assertStrongRegistrationPassword(password) {
       400,
       undefined,
       "WEAK_PASSWORD"
+    );
+  }
+}
+
+function assertLegalConsent({ acceptedTermsVersion, acceptedPrivacyNoticeVersion } = {}) {
+  if (
+    acceptedTermsVersion !== LEGAL_TERMS_VERSION ||
+    acceptedPrivacyNoticeVersion !== PRIVACY_NOTICE_VERSION
+  ) {
+    throw createHttpError(
+      "Setujui Syarat & Ketentuan dan Pemberitahuan Privasi yang berlaku untuk membuat akun.",
+      400,
+      undefined,
+      "LEGAL_CONSENT_REQUIRED"
     );
   }
 }
@@ -625,7 +643,7 @@ async function getProfileByUserId({ userId, accessToken }) {
 }
 
 async function register(
-  { email, password, accountName, fullName },
+  { email, password, accountName, fullName, acceptedTermsVersion, acceptedPrivacyNoticeVersion, referralToken },
   dependencies = {}
 ) {
   const authClient = dependencies.authClient || createSupabaseAuthClient();
@@ -636,17 +654,31 @@ async function register(
   const subscriptionEnsurer =
     dependencies.subscriptionEnsurer || ensureFreeSubscriptionForUser;
   const adminClient = dependencies.adminClient || supabaseAdmin;
+  const registrationLogger = dependencies.logger || console;
 
   async function timedStage(stage, operation) {
     const startedAt = performance.now();
     let status = "success";
     try {
-      return await operation();
+      const result = await operation();
+      // Supabase returns Auth errors in the response rather than throwing them.
+      // Record the provider cause before the public registration error masks it.
+      if (stage === "supabase-signup" && result?.error) {
+        status = "error";
+        const providerError = result.error;
+        registrationLogger.error("[auth-register-provider-error]", {
+          requestId: dependencies.requestId || "unknown",
+          providerStatus: Number(providerError.status) || null,
+          providerCode: /^[A-Za-z0-9_.:-]{1,100}$/.test(String(providerError.code || "")) ? providerError.code : "AUTH_PROVIDER_ERROR",
+          message: redactMessage(providerError.message),
+        });
+      }
+      return result;
     } catch (error) {
       status = "error";
       throw error;
     } finally {
-      console.log(`[auth-register] requestId=${dependencies.requestId || "unknown"} stage=${stage} status=${status} durationMs=${Math.round(performance.now() - startedAt)}`);
+      registrationLogger.log(`[auth-register] requestId=${dependencies.requestId || "unknown"} stage=${stage} status=${status} durationMs=${Math.round(performance.now() - startedAt)}`);
     }
   }
 
@@ -684,6 +716,9 @@ async function register(
         display_name:
           normalizedInput.fullName ||
           normalizedInput.accountName,
+        accepted_terms_version: acceptedTermsVersion,
+        accepted_privacy_notice_version: acceptedPrivacyNoticeVersion,
+        legal_consent_accepted_at: new Date().toISOString(),
       },
     },
   }));
@@ -712,6 +747,20 @@ async function register(
     userId: signUpData.user.id,
     freePlan,
   }));
+
+  if (typeof referralToken === "string" && referralToken) {
+    try {
+      const { createReferralService } = require("./referralService");
+      await timedStage("referral-attribution", () => createReferralService({ db: adminClient }).createAttribution({
+        userId: signUpData.user.id,
+        token: referralToken,
+      }));
+    } catch (error) {
+      // Referral is optional; a temporary referral-storage failure must not
+      // turn a completed Supabase signup into a failed registration response.
+      console.error(`[auth-register] requestId=${dependencies.requestId || "unknown"} referral attribution was not saved code=${error.code || "REFERRAL_STORAGE_ERROR"}`);
+    }
+  }
 
   return buildRegistrationResponse({
     user: signUpData.user,
@@ -1052,8 +1101,11 @@ async function logout({ supabase }) {
 }
 
 module.exports = {
+  LEGAL_TERMS_VERSION,
+  PRIVACY_NOTICE_VERSION,
   assertAccountNameAvailable,
   assertAllowedRegistrationEmail,
+  assertLegalConsent,
   assertEmailConfirmed,
   assertRequiredAuthFields,
   assertStrongRegistrationPassword,

@@ -1,5 +1,6 @@
 ﻿const {
   assertAllowedRegistrationEmail,
+  assertLegalConsent,
   assertRequiredAuthFields,
   assertStrongRegistrationPassword,
   normalizeAuthPayload,
@@ -28,8 +29,16 @@ function validateRegisterRequest(req, res, next) {
     assertRequiredAuthFields(authInput, ["email", "password", "accountName"]);
     assertAllowedRegistrationEmail(authInput.email);
     assertStrongRegistrationPassword(authInput.password);
+    const legalConsent = {
+      acceptedTermsVersion: String(req.body?.acceptedTermsVersion || "").trim(),
+      acceptedPrivacyNoticeVersion: String(req.body?.acceptedPrivacyNoticeVersion || "").trim(),
+    };
+    assertLegalConsent(legalConsent);
 
-    req.authInput = authInput;
+    const referralToken = typeof req.body?.referralToken === "string" && req.body.referralToken.length <= 2048
+      ? req.body.referralToken.trim()
+      : "";
+    req.authInput = { ...authInput, ...legalConsent, referralToken };
     next();
   } catch (error) {
     next(error);

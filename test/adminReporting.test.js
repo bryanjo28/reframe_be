@@ -51,6 +51,10 @@ async function main() {
       : { data: [{ user_id: "user-a", last_login_at: loginAt }, { user_id: "user-b", last_login_at: null }], error: null };
   };
   supabaseAdmin.from = (table) => {
+    if (table === 'subscription_contracts') return { select() { return this; }, order() { return this; }, limit() { return this; }, in() { return this; },
+      then(resolve) { resolve({ data: [], error: null }); } };
+    if (['referral_attributions', 'referral_credit_grants', 'credit_lots'].includes(table)) return { select() { return this; }, in() { return this; }, eq() { return this; },
+      then(resolve) { resolve({ data: [], error: null }); } };
     assert.equal(table, "social_accounts");
     return { select() { return this; }, in() { return this; }, eq: async () => ({ data: [], error: null }) };
   };
