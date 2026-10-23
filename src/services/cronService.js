@@ -24,7 +24,15 @@ async function runDueScheduledJobs({
   }
 
   const nowIso = new Date().toISOString();
-  for (const [name, reconcile] of [['subscriptions', reconcileSubscriptions], ['payments', reconcilePayments]]) {
+  const reconcileReferrals = async () => {
+    const { error } = await supabase.rpc('process_due_referral_rewards', { p_limit: 100 });
+    if (error) throw new Error(error.message);
+  };
+  const reconcileSubscriptionReminders = async () => {
+    const { error } = await supabase.rpc('process_subscription_expiry_reminders', { p_limit: 500 });
+    if (error) throw new Error(error.message);
+  };
+  for (const [name, reconcile] of [['subscriptions', reconcileSubscriptions], ['payments', reconcilePayments], ['subscription reminders', reconcileSubscriptionReminders], ['referral rewards', reconcileReferrals]]) {
     try { await reconcile(); }
     catch (error) { console.error(`[cron] ${name} reconciliation failed:`, error.message); }
   }

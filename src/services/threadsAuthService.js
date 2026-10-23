@@ -313,43 +313,81 @@ function createAuthorizationRequest({ userId }) {
   };
 }
 
-async function handleCallback({ code, state }, dependencies = {}) {
-  if (!code) {
-    throw createHttpError("Missing OAuth code", 400);
+async function handleCallback({ code, state, requestId }, dependencies = {}) {
+  const logger = dependencies.logger || console;
+  const traceId = requestId || crypto.randomUUID();
+  async function stage(name, operation) {
+    const startedAt = Date.now();
+    const log = (event, fields = {}) => {
+      // Deliberately omit messages, URLs, response bodies, authorization codes and tokens.
+      try {
+        logger.info('[threads-oauth] ' + JSON.stringify({
+          timestamp: new Date().toISOString(), requestId: traceId,
+          stage: name, event, durationMs: Date.now() - startedAt, ...fields,
+        }));
+      } catch (_) { /* Diagnostics must not interrupt OAuth. */ }
+    };
+    log('stage_started');
+    try {
+      const result = await operation();
+      log('stage_completed');
+      return result;
+    } catch (error) {
+      error.oauthStage = name;
+      const provider = error.details?.error;
+      const numeric = value => Number.isFinite(value) ? value : undefined;
+      const dbCode = error.details?.code;
+      log('stage_failed', {
+        httpStatus: numeric(error.status),
+        providerCode: numeric(provider?.code),
+        providerSubcode: numeric(provider?.error_subcode),
+        dbCode: typeof dbCode === 'string' && /^[A-Z0-9]{5}$/.test(dbCode) ? dbCode : undefined,
+      });
+      throw error;
+    }
   }
+  const verifiedSession = await stage('validate_callback', async () => {
+    if (!code) {
+      throw createHttpError("Missing OAuth code", 400);
+    }
 
-  if (!state) {
-    throw createHttpError("Missing OAuth state", 400);
-  }
+    if (!state) {
+      throw createHttpError("Missing OAuth state", 400);
+    }
 
-  const oauthSession = oauthStateStore.consume(state);
-  const verifiedSession =
-    oauthSession && oauthSession.provider === "threads"
-      ? oauthSession
-      : parseSignedState(state);
+    const oauthSession = oauthStateStore.consume(state);
+    const verifiedSession =
+      oauthSession && oauthSession.provider === "threads"
+        ? oauthSession
+        : parseSignedState(state);
 
-  if (!verifiedSession || verifiedSession.provider !== "threads") {
-    throw createHttpError("Invalid or expired OAuth state", 400);
-  }
-
-  const shortLivedToken = await exchangeCodeForShortLivedToken({ code });
-  const longLivedToken = await exchangeForLongLivedToken({
-    accessToken: shortLivedToken.accessToken,
+    if (!verifiedSession || verifiedSession.provider !== "threads") {
+      throw createHttpError("Invalid or expired OAuth state", 400);
+    }
+    return verifiedSession;
   });
+
+  const shortLivedToken = await stage('short_token_exchange', () =>
+    (dependencies.exchangeCode || exchangeCodeForShortLivedToken)({ code }));
+  const longLivedToken = await stage('long_token_exchange', () =>
+    (dependencies.exchangeLongToken || exchangeForLongLivedToken)({
+      accessToken: shortLivedToken.accessToken,
+    }));
 
   const activeAccessToken = longLivedToken.accessToken || shortLivedToken.accessToken;
   const activeRefreshToken = longLivedToken.refreshToken || shortLivedToken.refreshToken;
   const activeExpiresIn = longLivedToken.expiresIn || shortLivedToken.expiresIn;
 
-  const threadsUser = await getThreadsUser(activeAccessToken);
+  const threadsUser = await stage('profile_fetch', () =>
+    (dependencies.fetchUser || getThreadsUser)(activeAccessToken));
   const persistAccount = dependencies.persistAccount || saveThreadsAccount;
-  const persisted = await persistAccount({
+  const persisted = await stage('account_persist', () => persistAccount({
       userId: verifiedSession.userId,
       accessToken: activeAccessToken,
       refreshToken: activeRefreshToken,
       expiresIn: activeExpiresIn,
       threadsUser,
-    });
+    }));
 
   return {
     userId: verifiedSession.userId,

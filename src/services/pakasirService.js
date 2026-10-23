@@ -1,5 +1,6 @@
 const { withRequestTimeout } = require('../utils/requestTimeout');
 const { getPaymentMethod } = require('../config/paymentMethods');
+const { paymentLog, paymentErrorFields } = require('../utils/paymentLogger');
 
 function paymentError(message, status = 502, code = 'PAKASIR_ERROR') {
   return Object.assign(new Error(message), { status, code });
@@ -19,17 +20,25 @@ function createPakasirClient({ env = process.env, fetch: fetcher = (...args) => 
   }
   async function request(path, options = {}) {
     configured();
-    return withRequestTimeout(async signal => {
+    const operation = path.split('/')[0];
+    const startedAt = Date.now();
+    paymentLog('gateway_request_started', { operation });
+    try { return await withRequestTimeout(async signal => {
       const response = await fetcher(`https://app.pakasir.com/api/v2/${path}`, {
         ...options, signal,
         headers: { 'X-Api-Key': env.PAKASIR_API_KEY.trim(), 'Content-Type': 'application/json', Accept: 'application/json' },
       });
       const data = await response.json().catch(() => null);
+      paymentLog('gateway_response', { operation, upstreamStatus: response.status,
+        responseValid: Boolean(data && typeof data === 'object'), durationMs: Date.now() - startedAt });
       if (!response.ok || !data || typeof data !== 'object') {
-        throw paymentError('Request Pakasir gagal. Silakan coba kembali.', response.status === 429 ? 429 : 502);
+        throw Object.assign(paymentError('Request Pakasir gagal. Silakan coba kembali.', response.status === 429 ? 429 : 502), { upstreamStatus: response.status });
       }
       return data;
-    });
+    }); } catch (error) {
+      paymentLog('gateway_request_failed', { operation, durationMs: Date.now() - startedAt, ...paymentErrorFields(error) });
+      throw error;
+    }
   }
   function create(orderId, amount, method = 'qris') {
     configured();

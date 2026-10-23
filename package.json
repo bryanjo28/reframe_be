@@ -7,9 +7,12 @@
         "dev": "node --watch src/server.js",
         "start": "node src/server.js",
         "cron:run": "node scripts/run-scheduled-jobs.js",
-        "test:billing": "node test/prepaidSubscriptionsMigration.test.js && node test/prepaidPayments.test.js && node test/subscriptionPeriodsService.test.js && node test/paymentsPageSubscriptions.test.js && node test/prepaidCron.test.js",
+        "test:threads-oauth": "node test/threadsOAuthLogging.test.js && node test/threadsAuthService.test.js",
+        "test:referrals": "node test/referralService.test.js && node test/referralProgramMigration.test.js",
+        "test:subscription-pricing": "node test/subscriptionPricingService.test.js && node test/subscriptionDurationMigration.test.js",
+        "test:billing": "node test/prepaidSubscriptionsMigration.test.js && node test/pendingTopupMigration.test.js && node test/subscriptionPlanCatalogMigration.test.js && node test/subscriptionPlansService.test.js && node test/prepaidPayments.test.js && node --test test/subscriptionCheckoutRegression.test.js && node test/subscriptionPeriodsService.test.js && node test/paymentsPageSubscriptions.test.js && node test/prepaidCron.test.js",
         "pretest": "npm run test:billing",
-        "test": "node test/pakasirPayments.test.js && node test/run-tests.js && node test/aiCreditsService.test.js && node test/securityConfig.test.js && node test/threadsTokenLifecycle.test.js && node test/threadsDeletion.test.js && node test/threadsScheduledCancellation.test.js && node test/rateLimiters.test.js && node test/requestSizeLimit.test.js && node test/adminMiddleware.test.js && node test/adminAccess.api.test.js && node test/adminReporting.test.js && node test/betaReadiness.test.js && node test/betaHardening.test.js && node test/resetPasswordRecovery.test.js"
+        "test": "node test/pakasirPayments.test.js && node test/paymentLogging.test.js && node test/run-tests.js && node test/aiCreditsService.test.js && node test/securityConfig.test.js && node test/threadsTokenLifecycle.test.js && node test/threadsDeletion.test.js && node test/threadsScheduledCancellation.test.js && node test/rateLimiters.test.js && node test/requestSizeLimit.test.js && node test/adminMiddleware.test.js && node test/adminAccess.api.test.js && node test/adminReporting.test.js && node test/adminTransactions.test.js && node test/betaReadiness.test.js && node test/betaHardening.test.js && node test/resetPasswordRecovery.test.js"
     },
     "keywords": [],
     "author": "",

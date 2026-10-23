@@ -11,6 +11,8 @@ const LIMITS = Object.freeze({
   metaDeletion: { windowMs: 60 * 60 * 1000, limit: 20 },
   adminApi: { windowMs: 60 * 1000, limit: 60 },
   paymentTrigger: { windowMs: 60 * 1000, limit: 5 },
+  feedbackSubmission: { windowMs: 60 * 60 * 1000, limit: 5 },
+  referralValidation: { windowMs: 15 * 60 * 1000, limit: 30 },
 });
 
 function handler(req, res) {
@@ -47,12 +49,16 @@ const metaDeletionLimiter = createLimiter(LIMITS.metaDeletion);
 const adminApiLimiter = createLimiter(LIMITS.adminApi, { keyGenerator: authenticatedUserKey });
 // Shared by order creation and checkout retry; counters are per Node process.
 const paymentTriggerLimiter = createLimiter(LIMITS.paymentTrigger, { keyGenerator: authenticatedUserKey });
+const feedbackSubmissionLimiter = createLimiter(LIMITS.feedbackSubmission, { keyGenerator: authenticatedUserKey });
+const referralValidationLimiter = createLimiter(LIMITS.referralValidation);
 
 module.exports = {
   LIMITS,
   aiGenerationLimiter,
   adminApiLimiter,
   forgotPasswordLimiter,
+  feedbackSubmissionLimiter,
+  referralValidationLimiter,
   globalApiLimiter,
   loginLimiter,
   metaDeletionLimiter,

@@ -17,6 +17,8 @@ const threadsAccountsRoutes = require("./threadsAccountsRoutes");
 const threadsRoutes = require("./threadsRoutes");
 const paymentsRoutes = require("./paymentsRoutes");
 const notificationsRoutes = require("./notificationsRoutes");
+const feedbackRoutes = require("./feedbackRoutes");
+const referralRoutes = require("./referralRoutes");
 const adminRoutes = require("./admin/adminRoutes");
 
 const router = express.Router();
@@ -62,6 +64,8 @@ router.use("/threads-accounts", threadsAccountsRoutes);
 router.use("/threads", threadsRoutes);
 router.use("/payments", paymentsRoutes);
 router.use("/notifications", notificationsRoutes);
+router.use("/feedback", feedbackRoutes);
+router.use("/referrals", referralRoutes);
 router.use("/admin", adminRoutes);
 
 module.exports = router;

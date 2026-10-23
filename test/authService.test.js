@@ -77,6 +77,38 @@ function createSupabaseMock({ profileRow, socialAccountRow, personaConfigRow = n
 }
 
 async function main() {
+  await run("register marks returned Supabase errors as failed and logs a redacted provider cause", async () => {
+    const stageLogs = [];
+    const providerLogs = [];
+    let subscriptionCalled = false;
+    {
+      await assert.rejects(authService.register({
+        email: "private@example.com", password: "Password123", accountName: "signup-test",
+      }, {
+        requestId: "signup-request",
+        logger: { log: (...args) => stageLogs.push(args.join(" ")), error: (...args) => providerLogs.push(args) },
+        accountNameChecker: async () => {},
+        freePlanLoader: async () => ({ id: "free-plan" }),
+        subscriptionEnsurer: async () => { subscriptionCalled = true; },
+        authClient: { auth: { signUp: async () => ({ data: { user: null, session: null }, error: {
+          status: 500, code: "unexpected_failure",
+          message: "Error sending confirmation email to private@example.com password=hidden-password access_token=hidden-token",
+        } }) } },
+      }), { status: 500, code: "REGISTRATION_FAILED", message: "Registration failed" });
+      const requestStages = stageLogs.filter(line => line.includes('requestId=signup-request '));
+      assert.ok(requestStages.some(line => /stage=supabase-signup status=error/.test(line)));
+      assert.equal(requestStages.some(line => /stage=supabase-signup status=success/.test(line)), false);
+      const requestErrors = providerLogs.filter(args => args[0] === '[auth-register-provider-error]' && args[1]?.requestId === 'signup-request');
+      assert.equal(requestErrors.length, 1);
+      const details = requestErrors[0][1];
+      assert.equal(details.requestId, "signup-request");
+      assert.equal(details.providerCode, "unexpected_failure");
+      assert.equal(details.providerStatus, 500);
+      assert.match(details.message, /Error sending confirmation email/);
+      assert.doesNotMatch(JSON.stringify(requestErrors), /private@example\.com|hidden-password|hidden-token|Password123/);
+      assert.equal(subscriptionCalled, false);
+    }
+  });
   await run("register runs prechecks concurrently and awaits subscription with the same plan", async () => {
     let releaseAccountCheck;
     let planLoaded = false;
