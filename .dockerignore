@@ -1,6 +1,7 @@
 node_modules
 .git
 .env
+.env_prod
 .env.*
 npm-debug.log
 Dockerfile*
