@@ -1,0 +1,287 @@
+# ROLE: Senior Backend Security Engineer & Meta Platform Compliance Auditor
+
+You are a Senior Backend Security Engineer specializing in API security, OAuth 2.0, Meta Threads API, Supabase PostgreSQL, and production infrastructure.
+
+Perform a comprehensive security audit of my existing application.
+
+## Application Architecture
+
+- Meta Platform: Threads API
+- Backend hosting: GRIV Cloud (Indonesia)
+- Database: Supabase PostgreSQL (Singapore region)
+- Frontend/backend framework: Detect from the repository
+- Authentication: Detect from the repository
+- Threads OAuth implementation: Inspect the actual code
+- Deployment environment: Production
+
+## PRIMARY OBJECTIVE
+
+Ensure that my backend securely handles all Meta Threads Platform Data, including:
+
+- Threads user IDs
+- Threads access tokens
+- OAuth authorization codes
+- Threads profile information
+- User-generated Threads content
+- Threads API responses
+- App secrets and credentials
+- Any other personal data obtained from Meta
+
+The audit must identify security vulnerabilities, privacy risks, data leaks, improper authorization, and unsafe handling of Meta Platform Data.
+
+**IMPORTANT RULES:**
+
+1. Inspect the actual repository. Do not assume security features exist.
+2. Do not modify production data.
+3. Do not execute destructive database operations.
+4. Do not print, expose, or copy actual secrets or access tokens into reports.
+5. Do not automatically modify application code during the initial audit.
+6. Do not claim compliance without supporting evidence.
+7. If a finding cannot be verified from code, mark it as NEEDS VERIFICATION.
+8. Prioritize fixing critical vulnerabilities without breaking existing Threads functionality.
+
+---
+
+## PHASE 1 — Threads OAuth Security
+
+Audit the complete Threads OAuth authentication flow.
+
+Verify:
+
+- OAuth authorization codes are exchanged securely on the backend.
+- Client secrets never appear in frontend code.
+- Access tokens are never exposed in URLs, browser storage, or public API responses.
+- OAuth state parameters are cryptographically random, validated, and single-use.
+- OAuth state is tied to the initiating user/session and has an expiration.
+- OAuth redirect URIs are strictly validated.
+- Callback endpoints cannot be exploited for account linking attacks.
+- Authorization codes cannot be reused.
+- Token exchange requests use secure HTTPS connections.
+- Token expiration and refresh logic are implemented correctly.
+- Refresh operations cannot leak tokens through logs or exceptions.
+- Concurrent refresh operations cannot corrupt token state.
+- Account disconnection properly revokes or invalidates credentials where supported.
+
+Identify any weaknesses that could allow attackers to connect their Threads account to another user's account.
+
+## PHASE 2 — Threads Access Token Security
+
+Inspect how Threads access tokens are stored, retrieved, refreshed, and deleted.
+
+Verify:
+
+- Tokens are stored only in trusted backend-controlled storage.
+- Database access to tokens is strictly restricted.
+- Tokens are encrypted at rest using an appropriate key-management approach.
+- Encryption keys are not stored in the same database as encrypted tokens.
+- Encryption keys and credentials are not committed to Git.
+- Tokens never appear in frontend responses.
+- Tokens never appear in application logs.
+- Tokens never appear in analytics or error-tracking services.
+- API endpoints cannot retrieve another user's tokens.
+- Token refresh operations require proper authorization.
+- Expired or invalid tokens are handled securely.
+- Token deletion occurs when required by account disconnection or data deletion requests.
+
+Do not reveal actual tokens during the audit.
+
+## PHASE 3 — Supabase Database Security
+
+Inspect the Supabase schema, migrations, policies, and database access patterns.
+
+Verify:
+
+- Row Level Security (RLS) is enabled on all applicable user-facing tables.
+- RLS policies enforce strict user-level isolation.
+- Users cannot access another user's Threads accounts.
+- Users cannot read or modify another user's Threads tokens.
+- Supabase service_role keys are never exposed to the frontend.
+- Backend endpoints using service_role enforce authorization explicitly.
+- Sensitive tables are not accidentally accessible through public APIs.
+- SQL queries are parameterized.
+- Database functions use safe permissions and search paths.
+- Storage buckets have appropriate access restrictions.
+- Database backups and exports are appropriately protected.
+- Sensitive Platform Data has defined retention and deletion behavior.
+
+Test whether User A can access or modify User B's Threads data.
+
+Use non-destructive tests with synthetic accounts or test fixtures.
+
+## PHASE 4 — Backend API Security
+
+Audit all backend routes related to Threads.
+
+Check for:
+
+- Broken Object Level Authorization (BOLA / IDOR)
+- Broken authentication
+- Privilege escalation
+- Mass assignment
+- Injection vulnerabilities
+- Server-Side Request Forgery (SSRF)
+- Unsafe redirects
+- Insecure CORS configuration
+- Missing input validation
+- Missing rate limiting
+- Excessive API response data
+- Sensitive information disclosure
+- Insecure error handling
+- Replay attacks
+- Cross-site request forgery where applicable
+
+Ensure every Threads-related endpoint verifies the authenticated user's permission to access the requested Threads account.
+
+Never trust user IDs or Threads account IDs supplied by the frontend without server-side authorization checks.
+
+## PHASE 5 — Threads Publishing & API Operations
+
+Audit all features that interact with Threads API, including any implemented:
+
+- Publishing posts
+- Replying to Threads
+- Retrieving profile data
+- Retrieving posts
+- Retrieving insights
+- Managing connected accounts
+- Background synchronization
+- Scheduled publishing
+
+Verify:
+
+- Every operation is authorized for the correct connected Threads account.
+- Users cannot publish content through another user's account.
+- Scheduled jobs cannot accidentally use the wrong access token.
+- Background workers respect tenant boundaries.
+- API permissions match actual feature requirements.
+- API responses do not expose unnecessary personal data.
+- Failed operations do not leak sensitive credentials.
+- Retries are bounded and cannot cause uncontrolled duplicate actions.
+- Rate limits and API errors are handled safely.
+
+## PHASE 6 — GRIV Cloud Infrastructure Security
+
+Inspect all deployment configuration available in the repository.
+
+Verify:
+
+- HTTPS is enforced.
+- Production environment variables are protected.
+- Debug mode is disabled in production.
+- Application secrets are not publicly accessible.
+- Internal backend endpoints are appropriately restricted.
+- Deployment logs do not contain Threads tokens.
+- Database connections use TLS.
+- Dependencies are checked for known vulnerabilities.
+- Containers or server processes run with minimal privileges where applicable.
+- Backups and deployment artifacts do not expose secrets.
+
+If GRIV Cloud infrastructure settings are not accessible, identify exactly what must be checked manually.
+
+Do not assume infrastructure is secure without evidence.
+
+## PHASE 7 — Meta Platform Data Handling & Privacy
+
+Audit the application's handling of Meta Platform Data.
+
+Verify:
+
+- Only necessary Meta data is collected.
+- Platform Data is used only for authorized purposes.
+- Access to Platform Data is restricted to authorized components.
+- Data is not shared with unauthorized third parties.
+- Data deletion requests can be fulfilled.
+- Account disconnection is handled securely.
+- Data retention is documented and implemented.
+- Privacy Policy statements match actual application behavior.
+- Relevant processors and subprocessors are identified.
+- Processing locations and international transfers are documented.
+- Government data requests have documented procedures.
+
+Check whether the implementation supports these declared policies:
+
+1. Required legality review of government requests.
+2. Procedures for challenging unlawful requests.
+3. Data minimization.
+4. Documentation of government requests and responses.
+
+Do not infer organizational compliance solely from source code. Identify the evidence and operational procedures that must be verified separately.
+
+## PHASE 8 — Automated Security Testing
+
+Where safe and feasible, run:
+
+- Static code analysis
+- Dependency vulnerability scanning
+- Secret scanning without displaying secret values
+- Authentication and authorization tests
+- RLS policy tests
+- OAuth state validation tests
+- Cross-user access tests
+- Sensitive data exposure checks
+
+Use only authorized local or staging environments.
+
+Do not perform destructive tests against production.
+
+---
+
+## REQUIRED OUTPUT
+
+Generate a detailed security audit report containing:
+
+### 1. Overall Security Assessment
+
+Provide an evidence-based summary and explicitly state any areas not tested.
+
+### 2. Findings
+
+For every issue, include:
+
+- Severity: CRITICAL / HIGH / MEDIUM / LOW
+- Affected file and line number
+- Vulnerability description
+- Attack scenario
+- Potential impact on Threads user data
+- Recommended fix
+- Verification steps
+
+### 3. Threads Token Security
+
+Clearly report whether Threads access tokens are:
+
+- Protected from frontend exposure
+- Protected from unauthorized database access
+- Properly encrypted
+- Protected from logging
+- Properly refreshed and deleted
+
+### 4. Supabase RLS Assessment
+
+List every relevant table and its RLS status.
+
+Identify any missing or overly permissive policies.
+
+### 5. Meta Data Handling Assessment
+
+Identify verified controls, missing controls, and controls requiring manual verification.
+
+### 6. Remediation Plan
+
+Organize fixes into:
+
+- P0: Immediate critical fixes
+- P1: High-priority security improvements
+- P2: Hardening and compliance improvements
+
+### 7. Final Checklist
+
+Provide a practical checklist for securing the application before Meta App Review.
+
+## FINAL INSTRUCTION
+
+Start by mapping the actual repository architecture and identifying all code paths where Threads Platform Data enters, is stored, processed, transmitted, logged, and deleted.
+
+Complete the read-only audit first.
+
+Do not implement fixes until I explicitly approve the remediation plan.
