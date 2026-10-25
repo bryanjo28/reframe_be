@@ -20,6 +20,7 @@ const {
 } = require("./threadsPublishProgressService");
 
 const THREADS_API_BASE = "https://graph.threads.net";
+const { reportError } = require("./errorAlertService");
 const THREADS_API_VERSION = "v1.0";
 const THREADS_TOKEN_REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const THREADS_POST_INTERVAL_MS = Math.max(
@@ -1754,6 +1755,13 @@ async function runScheduledThreadsJob({ supabase, credentialSupabase = supabaseA
         } catch (error) {
           if (error.code === "THREADS_JOB_CANCELLED") jobCancelled = true;
           console.error("[runScheduledThreadsJob] publish failed for content_output:", claimedRow.id, error.message, error.details || "");
+          if (error.code !== "THREADS_JOB_CANCELLED") {
+            await reportError({
+              source: error.code === "THREADS_RECONNECT_REQUIRED" ? "threads_connection" : "threads_auto_post",
+              error: { code: error.code || (/uncertain/i.test(error.message) ? "THREADS_PUBLISH_UNCERTAIN" : "THREADS_PUBLISH_FAILED"), message: error.message },
+              context: { scheduled_job_id: scheduledJob.id, content_output_id: claimedRow.id },
+            });
+          }
           jobFailedCount += 1;
 
           await markContentOutputFailed({

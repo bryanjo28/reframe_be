@@ -1,4 +1,5 @@
 const cron = require("node-cron");
+const { reportError, dispatchErrorAlerts } = require("./errorAlertService");
 const { supabaseAdmin, isSupabaseAdminConfigured } = require("../config/supabase");
 const { runScheduledThreadsJob } = require("./threadsPublishService");
 const {
@@ -6,7 +7,7 @@ const {
   claimScheduledContentGenerationJob,
 } = require("./contentOutputsService");
 
-async function runDueScheduledJobs({
+async function runDueScheduledJobsInternal({
   isConfigured = isSupabaseAdminConfigured,
   supabase = supabaseAdmin,
   claimContentGenerationJob = claimScheduledContentGenerationJob,
@@ -113,6 +114,7 @@ async function runDueScheduledJobs({
       console.warn(`[cron] Unsupported job type ${job.job_type} for job ${job.id}`);
     } catch (err) {
       console.error(`[cron] Job ${job.id} for user ${job.user_id} failed:`, err.message);
+      await reportError({ source: "cron", error: err, context: { scheduled_job_id: job.id } });
       await supabase
         .from("scheduled_jobs")
         .update({
@@ -126,6 +128,18 @@ async function runDueScheduledJobs({
         .eq("user_id", job.user_id)
         .eq("status", "running");
     }
+  }
+}
+
+async function runDueScheduledJobs(options = {}) {
+  try {
+    return await runDueScheduledJobsInternal(options);
+  } catch (error) {
+    await reportError({ source: "cron", error });
+    throw error;
+  } finally {
+    // Also runs when no content jobs are due and before cron-once exits.
+    await dispatchErrorAlerts();
   }
 }
 
