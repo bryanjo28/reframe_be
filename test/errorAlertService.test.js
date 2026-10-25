@@ -28,15 +28,20 @@ async function main() {
     if (name === 'claim_error_alerts') return { data: [row], error: null };
     updates.push(args); return { error: null };
   } };
+  let sent;
   await dispatchErrorAlerts({ db: dispatchDb, env, fetchFn: async (url, options) => {
-    assert.equal(url, env.HERMES_ALERT_URL);
-    assert.equal(options.redirect, 'error');
-    const stamp = options.headers['X-Griv-Timestamp'];
-    const signature = createHmac('sha256', env.HERMES_ALERT_SECRET).update(stamp + '.' + options.body).digest('hex');
-    assert.equal(options.headers['X-Griv-Signature'], 'sha256=' + signature);
-    assert.equal(JSON.parse(options.body).event_id, row.id);
+    sent = { url, options };
     return { ok: true };
   } });
+  assert.equal(sent.url, env.HERMES_ALERT_URL);
+  assert.equal(sent.options.redirect, 'error');
+  const stamp = sent.options.headers['X-Webhook-Timestamp'];
+  assert.match(stamp || '', /^\d+$/);
+  assert.ok(Math.abs(Date.now() / 1000 - Number(stamp)) < 300);
+  const signature = createHmac('sha256', env.HERMES_ALERT_SECRET).update(stamp + '.' + sent.options.body).digest('hex');
+  assert.equal(sent.options.headers['X-Webhook-Signature-V2'], signature);
+  assert.equal(sent.options.headers['X-Griv-Signature'], undefined);
+  assert.equal(JSON.parse(sent.options.body).event_id, row.id);
   assert.equal(updates[0].p_success, true);
   assert.equal(updates[0].p_lock_token, 'lease');
   await dispatchErrorAlerts({ db: dispatchDb, env, fetchFn: async () => { throw new Error('offline'); } });

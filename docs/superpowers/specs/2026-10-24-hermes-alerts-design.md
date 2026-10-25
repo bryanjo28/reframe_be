@@ -12,7 +12,7 @@ Use a Supabase queue rather than direct delivery so alerts survive process exit 
 
 POST JSON containing `event_id`, `event_type: production_error`, `service: griv-backend`, `environment`, ISO `timestamp`, `severity`, `source`, `error: {code, message}`, an allowlisted `context`, and `occurrences`.
 
-Headers: `X-Griv-Timestamp` (Unix seconds) and `X-Griv-Signature: sha256=<hex HMAC-SHA256(secret, timestamp + '.' + rawBody)>`. Event ID and body remain stable across delivery retries; the timestamp and signature are regenerated for each attempt. Receiver must verify the raw body, accept timestamps within five minutes, and deduplicate by event ID. A 2xx acknowledges durable acceptance. No credentials, content text, request bodies, arbitrary metadata, or raw API responses are sent.
+Updated to match native Hermes V2: `X-Webhook-Timestamp` (integer Unix seconds) and `X-Webhook-Signature-V2` (lowercase hex HMAC-SHA256(secret, timestamp + '.' + rawBody), without prefix). Event ID and body remain stable across delivery retries; the timestamp and signature are regenerated for each attempt. Receiver must verify the raw body and accept timestamps within 300 seconds. Durable acceptance and event-ID deduplication are receiver requirements to verify separately on the native deployment. No credentials, content text, request bodies, arbitrary metadata, or raw API responses are sent.
 
 ## Implementation choices
 

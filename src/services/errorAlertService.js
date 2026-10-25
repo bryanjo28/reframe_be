@@ -61,7 +61,7 @@ async function dispatchErrorAlerts({ db = supabaseAdmin, env = process.env, fetc
         const signature = createHmac('sha256', env.HERMES_ALERT_SECRET).update(timestamp + '.' + body).digest('hex');
         const response = await fetchFn(url.toString(), {
           method: 'POST', redirect: 'error', signal: AbortSignal.timeout(3000),
-          headers: { 'Content-Type': 'application/json', 'X-Griv-Timestamp': timestamp, 'X-Griv-Signature': 'sha256=' + signature }, body,
+          headers: { 'Content-Type': 'application/json', 'X-Webhook-Timestamp': timestamp, 'X-Webhook-Signature-V2': signature }, body,
         });
         success = response.ok;
         await response.body?.cancel();

@@ -9,7 +9,7 @@ Initial scope: unexpected API server errors (5xx), Threads OAuth connection fail
 
 ```dotenv
 HERMES_ALERT_ENABLED=false
-HERMES_ALERT_URL=https://your-hermes-endpoint.example/errors
+HERMES_ALERT_URL=https://hermes-atx8xc-8644.eu5.sumopod.my.id/webhooks/griv-errors
 HERMES_ALERT_SECRET=replace-with-a-long-random-shared-secret
 ```
 
@@ -37,7 +37,9 @@ POST body:
 }
 ```
 
-Verify `X-Griv-Signature` equals `sha256=` plus the hex HMAC-SHA256 of `X-Griv-Timestamp + '.' + rawBody`, using the shared secret and a constant-time comparison. Require a Unix timestamp within five minutes. Verify the signature before parsing/processing. Deduplicate by event_id. Return 2xx only after durable acceptance, including for previously accepted IDs. A retry uses the same event ID and body with a fresh signature timestamp. Sender request timeout includes delivery; keep receiver acknowledgement fast and analyze asynchronously.
+The sender uses Hermes generic V2 authentication: `X-Webhook-Timestamp` is integer Unix seconds; `X-Webhook-Signature-V2` is lowercase hex HMAC-SHA256 of `timestamp + '.' + rawBody`, without a `sha256=` prefix. `HERMES_ALERT_SECRET` must match the secret configured for the `griv-errors` subscription. Hermes requires the timestamp within 300 seconds of its clock. No adapter or extra receiver is needed.
+
+Receiver requirements: verify against exact raw bytes using a constant-time comparison, deduplicate by event_id, and return 2xx only after acceptance. A retry uses the same event ID and body with a fresh signature timestamp. Native Hermes deployment behavior for durable acceptance/deduplication must be verified separately; configuring the signature does not guarantee those capabilities. Sender request timeout includes delivery; keep receiver acknowledgement fast and analyze asynchronously.
 
 Only allowlisted identifiers/status/sequence values are included in context. Raw HTTP bodies, OAuth codes/state, access tokens, content text and raw provider responses are excluded. Messages are redacted and capped; do not add arbitrary context fields without reviewing them. No Telegram messages or automated remediation are performed by this backend.
 
