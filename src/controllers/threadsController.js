@@ -3,6 +3,7 @@ const threadsAuthService = require("../services/threadsAuthService");
 const threadsAccountsService = require("../services/threadsAccountsService");
 const threadsDeletionService = require("../services/threadsDeletionService");
 const entitlementsService = require("../services/entitlementsService");
+const { reportError } = require("../services/errorAlertService");
 
 async function getConnectUrl(req, res, next) {
   try {
@@ -53,6 +54,10 @@ async function handleThreadsCallback(req, res, next) {
       error: error.message || "OAuth failed",
     });
 
+    // Invalid/missing OAuth state and user cancellation are not operational incidents.
+    if (req.query.code && req.query.state && error.message !== "Invalid or expired OAuth state") {
+      await reportError({ source: "threads_connection", error });
+    }
     return res.redirect(buildFrontendRedirect(params));
   }
 }

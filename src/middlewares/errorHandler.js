@@ -1,4 +1,5 @@
 const { recordServerError, redactMessage } = require("../services/admin/adminErrorLogService");
+const { reportError } = require("../services/errorAlertService");
 
 async function errorHandler(err, req, res, next) {
   if (err?.type === "entity.too.large") {
@@ -25,6 +26,7 @@ async function errorHandler(err, req, res, next) {
     const errorName = String(err.name || "Error").replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 80) || "Error";
     const message = redactMessage(err.message);
     const requestId = req.requestId || require("node:crypto").randomUUID();
+    await reportError({ source: "api", error: err, context: { request_id: requestId, status_code: statusCode } });
 
     console.error("[api-error]", { requestId, method: req.method, path: req.path, statusCode, errorCode, errorName, message });
     void recordServerError({
@@ -39,6 +41,10 @@ async function errorHandler(err, req, res, next) {
     }).catch(() => {
       console.error("[error-log] Unexpected persistence failure");
     });
+  }
+
+  if (statusCode < 500 && err.code === "THREADS_RECONNECT_REQUIRED") {
+    await reportError({ source: "threads_connection", error: err });
   }
 
   return res.status(err.status || 500).json({

@@ -200,7 +200,8 @@ test('three pending topups are allowed, a fourth is rejected, and existing check
   assert.deepEqual(created, [order.id, second.id, third.id, order.id]);
 });
 test('pending subscription and topup limits are independent', async () => {
-  const { service, orders } = fixture({ currentCode: 'starter', endsAt: new Date(now + 86400000).toISOString() });
+  // Active subscription lookup uses the wall clock, independently of the checkout clock.
+  const { service, orders } = fixture({ currentCode: 'starter', endsAt: new Date(Date.now() + 86400000).toISOString() });
   await service.createOrder('owner', { planId });
   await service.createOrder('owner', { packageId: planId });
   assert.deepEqual(orders.map(row => row.order_type), ['subscription', 'topup']);
